@@ -2,7 +2,7 @@
 
 **AI-Powered Resume Screening and Optimization System**
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://lata-resume-analyzer-ai.streamlit.app/)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen.svg)](https://resumeanalyzer-ai-jlhy.onrender.com/)
 [![GitHub stars](https://img.shields.io/github/stars/latamishra5/resumeanalyzer_ai.svg?style=social&label=Star)](https://github.com/latamishra5/resumeanalyzer_ai)
 [![GitHub forks](https://img.shields.io/github/forks/latamishra5/resumeanalyzer_ai.svg?style=social&label=Fork)](https://github.com/latamishra5/resumeanalyzer_ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -29,7 +29,9 @@ Resume Analyzer AI is an intelligent web application that leverages cutting-edge
 
 ## 🚀 Live Demo
 
-**🔗 [Try Resume Analyzer AI Now](https://lata-resume-analyzer-ai.streamlit.app/)**
+**🔗 [Try Resume Analyzer AI Now](https://resumeanalyzer-ai-jlhy.onrender.com/)**
+
+✅ **Status**: Live and Working on Render Cloud
 
 ---
 
@@ -145,7 +147,18 @@ LOG_LEVEL=INFO
 
 ## 🌐 Deployment Guide
 
-### Streamlit Cloud Deployment (Recommended)
+### ✅ Render Cloud Deployment (Working)
+
+**Current Live URL**: https://resumeanalyzer-ai-jlhy.onrender.com/
+
+#### Deployment Configuration:
+- **Platform**: Render Cloud
+- **Runtime**: Python 3.14.3
+- **Build Command**: `pip install -r requirements.txt`
+- **Start Command**: `streamlit run app.py --server.port=$PORT --server.address=0.0.0.0`
+- **Status**: ✅ Successfully Deployed
+
+### Streamlit Cloud Deployment (Alternative)
 
 #### Step 1: Prepare Your Repository
 1. Ensure all files are committed to GitHub
