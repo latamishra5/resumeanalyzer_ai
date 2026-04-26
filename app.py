@@ -17,7 +17,7 @@ from docx import Document
 import io
 import base64
 import plotly.graph_objects as go
-from streamlit_lottie import st_lottie
+# from streamlit_lottie import st_lottie  # Temporarily disabled for deployment
 import requests
 from dashboard.dashboard import DashboardManager
 from config.courses import COURSES_BY_CATEGORY, RESUME_VIDEOS, INTERVIEW_VIDEOS, get_courses_for_role, get_category_for_role
@@ -2871,7 +2871,7 @@ class ResumeApp:
         
         # Admin login/logout in sidebar
         with st.sidebar:
-            st_lottie(self.load_lottie_url("https://assets5.lottiefiles.com/packages/lf20_xyadoh9h.json"), height=200, key="sidebar_animation")
+            # st_lottie(self.load_lottie_url("https://assets5.lottiefiles.com/packages/lf20_xyadoh9h.json"), height=200, key="sidebar_animation")  # Temporarily disabled for deployment
             st.title("Resume Analyzer(AI)")
             st.markdown("---")
             
