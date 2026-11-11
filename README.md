@@ -244,38 +244,34 @@ sqlite3.OperationalError: no such table
 
 ```
 resumeanalyzer_ai/
-├── 📄 app.py                 # Main application file
-├── 📄 requirements.txt      # Python dependencies
-├── 📄 .env.example         # Environment variables template
-├── 📄 README.md            # Project documentation
-├── 📄 run_app.py           # Application launcher
-├── 📄 setup_chromedriver.py # ChromeDriver setup
-├── 📄 create_admin.py      # Admin account creator
-├── 📄 reset_admin_password.py # Admin password reset
-├── 📁 config/              # Configuration modules
-│   ├── 📄 database.py      # Database operations
-│   ├── 📄 courses.py       # Course recommendations
-│   └── 📄 job_roles.py     # Job role definitions
-├── 📁 utils/               # Utility modules
-│   ├── 📄 ai_resume_analyzer.py  # AI analysis engine
-│   ├── 📄 resume_analyzer.py      # Basic analysis
-│   ├── 📄 resume_builder.py      # Resume builder
-│   ├── 📄 resume_parser.py       # Resume parsing
-│   ├── 📄 database.py            # Database utilities
-│   └── 📄 excel_manager.py       # Excel export
-├── 📁 dashboard/           # Dashboard components
-├── 📁 feedback/            # Feedback system
-├── 📁 jobs/               # Job search functionality
-│   ├── 📄 job_search.py    # Job search
-│   ├── 📄 linkedin_scraper.py # LinkedIn scraper
-│   ├── 📄 companies.py     # Company data
-│   ├── 📄 suggestions.py   # Job suggestions
-│   └── 📄 job_portals.py   # Job portals
-├── 📁 style/              # CSS styles
-│   └── 📄 style.css        # Main styles
-├── 📁 screenshots/        # Application screenshots
-├── 📁 poppler/            # Poppler for PDF processing
-└── 📁 venv/              # Virtual environment (gitignored)
+├── 📄 app.py                        # Root Streamlit entrypoint
+├── 📄 run_app.py                    # Application launcher
+├── 📄 requirements.txt              # Python dependencies
+├── 📄 .env.example                  # Environment variables template
+├── 📄 README.md                     # Project documentation
+├── 📁 frontend/                     # Streamlit UI layer
+│   ├── 📄 app.py                    # App coordinator, navigation & sidebar
+│   ├── 📁 pages/                    # Page views (home, analyzer, builder, dashboard, job_search, feedback, about)
+│   ├── 📁 components/               # Reusable UI components & auth UI
+│   ├── 📁 styles/
+│   │   └── 📄 style.css             # Main styles
+│   └── 📁 assets/                   # UI static assets
+├── 📁 backend/                      # Pure-Python business logic & data layer
+│   ├── 📁 config/                   # Paths, settings, courses & job roles
+│   ├── 📁 database/                 # SQLite connections, SQLAlchemy models & schemas
+│   ├── 📁 auth/                     # Authentication & session service
+│   ├── 📁 analyzers/                # Standard, spaCy & AI resume analyzers + parser
+│   ├── 📁 builders/                 # DOCX resume builder
+│   ├── 📁 services/                 # Dashboard, feedback & Excel services
+│   └── 📁 jobs/                     # Job portals, companies, filters & LinkedIn scraper
+├── 📁 scripts/                      # Admin & setup CLI utilities
+│   ├── 📄 setup_chromedriver.py     # ChromeDriver setup
+│   ├── 📄 create_admin.py           # Admin account creator
+│   ├── 📄 reset_admin_password.py   # Admin password reset
+│   └── 📄 check_gemini_models.py    # Gemini model diagnostic script
+├── 📁 screenshots/                  # Application screenshots
+├── 📁 poppler/                      # Poppler for PDF processing
+└── 📁 venv/                         # Virtual environment (gitignored)
 ```
 
 ---
