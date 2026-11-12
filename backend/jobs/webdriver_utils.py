@@ -46,6 +46,23 @@ def get_chrome_version():
 
     if system == "Windows":
         try:
+            import winreg
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for subkey in (
+                    r"Software\Google\Chrome\BLBeacon",
+                    r"Software\Wow6432Node\Google\Chrome\BLBeacon",
+                ):
+                    try:
+                        with winreg.OpenKey(hive, subkey) as key:
+                            version, _ = winreg.QueryValueEx(key, "version")
+                            if version:
+                                return str(version).split('.')[0]
+                    except OSError:
+                        continue
+        except Exception:
+            pass
+
+        try:
             chrome_paths = [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -55,15 +72,18 @@ def get_chrome_version():
             for path in chrome_paths:
                 if os.path.exists(path):
                     try:
-                        wmic_path = path.replace("\\", "\\\\")
                         output = subprocess.check_output(
-                            ['wmic', 'datafile', 'where', f'name="{wmic_path}"', 'get', 'Version', '/value'],
+                            [
+                                'powershell',
+                                '-NoProfile',
+                                '-Command',
+                                f"(Get-Item -LiteralPath '{path}').VersionInfo.ProductVersion",
+                            ],
                             stderr=subprocess.STDOUT,
                         )
                         version_str = output.decode('utf-8').strip()
-                        if "Version=" in version_str:
-                            version = version_str.split('=')[1].split('.')[0]
-                            return version
+                        if version_str:
+                            return version_str.split('.')[0]
                     except Exception:
                         try:
                             output = subprocess.check_output([path, '--version'], stderr=subprocess.STDOUT)

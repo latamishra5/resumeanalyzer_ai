@@ -1,44 +1,71 @@
-import spacy
-from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
+import re
+
+try:
+    import spacy
+except (ImportError, OSError):
+    spacy = None
+
 
 class ResumeAnalyzer:
     def __init__(self):
-        self.nlp = spacy.load("en_core_web_sm")
-        
+        self.nlp = None
+        if spacy is not None:
+            try:
+                self.nlp = spacy.load("en_core_web_sm")
+            except (OSError, Exception):
+                self.nlp = spacy.blank("en")
+                if "sentencizer" not in self.nlp.pipe_names:
+                    self.nlp.add_pipe("sentencizer")
+
     def analyze_resume(self, resume_text):
         """Analyze resume text and return metrics"""
-        doc = self.nlp(resume_text)
-        
-        # Basic metrics
         word_count = len(resume_text.split())
-        sentence_count = len(list(doc.sents))
-        
-        # Skills extraction
-        skills = self._extract_skills(doc)
-        
-        # Experience analysis
-        experience_years = self._analyze_experience(doc)
-        
+        if self.nlp is not None:
+            doc = self.nlp(resume_text)
+            sentence_count = len(list(doc.sents))
+            skills = self._extract_skills(doc)
+            experience_years = self._analyze_experience(doc)
+        else:
+            sentence_count = max(1, len([s for s in re.split(r"[.!?]+", resume_text) if s.strip()]))
+            skills = self._extract_skills_text(resume_text)
+            experience_years = self._analyze_experience_text(resume_text)
+
         # Calculate profile score
         profile_score = self._calculate_profile_score(
             word_count, sentence_count, len(skills), experience_years
         )
-        
+
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": {
                 "word_count": word_count,
                 "sentence_count": sentence_count,
                 "skills_count": len(skills),
                 "experience_years": experience_years,
-                "profile_score": profile_score
+                "profile_score": profile_score,
             },
             "skills": list(skills),
             "suggestions": self._generate_suggestions(
                 word_count, sentence_count, skills, experience_years
-            )
+            ),
         }
+
+    def _extract_skills_text(self, resume_text):
+        tech_skills = {
+            "python", "java", "javascript", "react", "node.js", "sql",
+            "html", "css", "aws", "docker", "kubernetes", "git",
+            "machine learning", "ai", "data science", "analytics",
+        }
+        lower = (resume_text or "").lower()
+        return {
+            skill for skill in tech_skills
+            if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)", lower)
+        }
+
+    def _analyze_experience_text(self, resume_text):
+        years = [int(m) for m in re.findall(r"\b(\d{1,2})\s*\+?\s*years?\b", (resume_text or "").lower())]
+        return max(years, default=0)
     
     def _extract_skills(self, doc):
         """Extract skills from resume"""

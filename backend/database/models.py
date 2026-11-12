@@ -1,6 +1,5 @@
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import json
 
@@ -8,6 +7,10 @@ from backend.config.settings import RESUME_DB_PATH
 
 # Create the base class for declarative models
 Base = declarative_base()
+
+
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 # Define the Resume model
@@ -18,8 +21,8 @@ class Resume(Base):
     user_id = Column(String(100))
     job_role = Column(String(100))
     content = Column(Text)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
 
 # Define the Analysis model
@@ -29,7 +32,7 @@ class Analysis(Base):
     id = Column(Integer, primary_key=True)
     resume_id = Column(Integer)
     analysis_data = Column(Text)  # Store JSON data
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class AIAnalysis(Base):
@@ -40,7 +43,7 @@ class AIAnalysis(Base):
     model_used = Column(String(100))
     resume_score = Column(Integer)
     job_role = Column(String(100))
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
 
 
 class DatabaseManager:

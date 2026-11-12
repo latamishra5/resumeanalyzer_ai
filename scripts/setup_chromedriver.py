@@ -18,35 +18,53 @@ def get_chrome_version():
     system = platform.system()
     
     if system == "Windows":
-        # Windows-specific Chrome detection
+        # Windows-specific Chrome detection via registry, file metadata, or CLI
         try:
-            # Try to find Chrome in Program Files
+            import winreg
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for subkey in (
+                    r"Software\Google\Chrome\BLBeacon",
+                    r"Software\Wow6432Node\Google\Chrome\BLBeacon",
+                ):
+                    try:
+                        with winreg.OpenKey(hive, subkey) as key:
+                            version, _ = winreg.QueryValueEx(key, "version")
+                            if version:
+                                return str(version).split('.')[0]
+                    except OSError:
+                        continue
+        except Exception:
+            pass
+
+        try:
             chrome_paths = [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
                 r"C:\Users\%USERNAME%\AppData\Local\Google\Chrome\Application\chrome.exe"
             ]
-            
+
             for path in chrome_paths:
                 expanded_path = os.path.expandvars(path)
                 if os.path.exists(expanded_path):
-                    # Use WMIC to get version info on Windows
                     try:
                         output = subprocess.check_output(
-                            ['wmic', 'datafile', 'where', f'name="{expanded_path.replace("\\", "\\\\")}"', 'get', 'Version', '/value'],
+                            [
+                                'powershell',
+                                '-NoProfile',
+                                '-Command',
+                                f"(Get-Item -LiteralPath '{expanded_path}').VersionInfo.ProductVersion",
+                            ],
                             stderr=subprocess.STDOUT
                         )
                         version_str = output.decode('utf-8').strip()
-                        if "Version=" in version_str:
-                            version = version_str.split('=')[1].split('.')[0]
-                            return version
-                    except:
-                        # Try alternative method
+                        if version_str:
+                            return version_str.split('.')[0]
+                    except Exception:
                         try:
                             output = subprocess.check_output([expanded_path, '--version'], stderr=subprocess.STDOUT)
                             version = output.decode('utf-8').strip().split()[-1].split('.')[0]
                             return version
-                        except:
+                        except Exception:
                             pass
         except Exception as e:
             print(f"Could not determine Chrome version on Windows: {str(e)}")

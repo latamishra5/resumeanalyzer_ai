@@ -4,10 +4,12 @@ Handles login, signup, profile management interfaces, and Streamlit route guards
 """
 
 from functools import wraps
+import html
 import re
 import streamlit as st
 
 from backend.auth.auth_service import AuthService
+from backend.database.connection import get_user_resumes_history
 
 
 def require_auth(f):
@@ -44,7 +46,7 @@ class AuthUI:
 
         with col2:
             with st.form("login_form", clear_on_submit=True):
-                st.markdown("### 🔐 Login")
+                st.markdown("### Login")
 
                 username_or_email = st.text_input(
                     "Username or Email",
@@ -61,8 +63,9 @@ class AuthUI:
                 _remember_me = st.checkbox("Remember me for 30 days")
 
                 submitted = st.form_submit_button(
-                    "🚀 Login",
-                    use_container_width=True,
+                    "Login",
+                    icon=":material/login:",
+                    width="stretch",
                     type="primary",
                 )
 
@@ -79,6 +82,10 @@ class AuthUI:
                         if success:
                             if session_data:
                                 st.session_state.update(session_data)
+                            target_page = st.session_state.pop('redirect_to', 'home')
+                            if target_page in ('login', 'signup', ''):
+                                target_page = 'home'
+                            st.session_state['page'] = target_page
                             st.success(message)
                             st.rerun()
                         else:
@@ -86,12 +93,12 @@ class AuthUI:
 
             st.markdown("---")
             st.markdown("### New to Resume Analyzer AI?")
-            if st.button("📝 Create an Account", use_container_width=True):
+            if st.button("Create an Account", icon=":material/person_add:", width="stretch"):
                 st.session_state['page'] = 'signup'
                 st.rerun()
 
             st.markdown("---")
-            if st.button("🔑 Forgot Password?", use_container_width=True):
+            if st.button("Forgot Password?", icon=":material/key:", width="stretch"):
                 st.info("Password reset feature coming soon!")
 
     def render_signup_page(self):
@@ -107,7 +114,7 @@ class AuthUI:
 
         with col2:
             with st.form("signup_form", clear_on_submit=True):
-                st.markdown("### 📝 Sign Up")
+                st.markdown("### Sign Up")
 
                 st.markdown("#### Account Information")
 
@@ -172,8 +179,9 @@ class AuthUI:
                 )
 
                 submitted = st.form_submit_button(
-                    "🚀 Create Account",
-                    use_container_width=True,
+                    "Create Account",
+                    icon=":material/person_add:",
+                    width="stretch",
                     type="primary",
                 )
 
@@ -233,17 +241,20 @@ class AuthUI:
 
             st.markdown("---")
             st.markdown("### Already have an account?")
-            if st.button("🔐 Back to Login", use_container_width=True):
+            if st.button("Back to Login", icon=":material/login:", width="stretch"):
                 st.session_state['page'] = 'login'
                 st.rerun()
 
     def render_profile_page(self):
         """Render user profile page"""
-        if 'user_id' not in st.session_state:
+        user_id = st.session_state.get('user_id')
+        if not st.session_state.get('authenticated') or not isinstance(user_id, int):
             st.error("Please login to view your profile")
+            if st.button("Go to Login", icon=":material/login:"):
+                st.session_state['page'] = 'login'
+                st.rerun()
             return
 
-        user_id = st.session_state['user_id']
         profile = self.auth_manager.get_user_profile(user_id)
 
         if not profile:
@@ -260,7 +271,7 @@ class AuthUI:
         col1, col2, col3 = st.columns([1, 2, 1])
 
         with col2:
-            st.markdown("### 📋 Account Information")
+            st.markdown("### :material/badge: Account Information")
 
             col1, col2 = st.columns(2)
 
@@ -273,7 +284,7 @@ class AuthUI:
                 st.metric("Last Login", profile['last_login'][:10] if profile['last_login'] else "Never")
 
             st.markdown("---")
-            st.markdown("### ✏️ Edit Profile")
+            st.markdown("### :material/edit: Edit Profile")
 
             with st.form("edit_profile_form"):
                 st.markdown("#### Personal Information")
@@ -312,7 +323,7 @@ class AuthUI:
 
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:
-                    if st.form_submit_button("💾 Save Changes", use_container_width=True):
+                    if st.form_submit_button("Save Changes", icon=":material/save:", width="stretch"):
                         success, message = self.auth_manager.update_user_profile(
                             user_id=user_id,
                             full_name=full_name if full_name else None,
@@ -329,7 +340,7 @@ class AuthUI:
                             st.error(message)
 
             st.markdown("---")
-            st.markdown("### 🔐 Change Password")
+            st.markdown("### :material/lock_reset: Change Password")
 
             with st.form("change_password_form"):
                 current_password = st.text_input(
@@ -352,7 +363,7 @@ class AuthUI:
 
                 col1, col2, col3 = st.columns([1, 2, 1])
                 with col2:
-                    if st.form_submit_button("🔄 Change Password", use_container_width=True):
+                    if st.form_submit_button("Change Password", icon=":material/sync:", width="stretch"):
                         if not current_password or not new_password or not confirm_new_password:
                             st.error("Please fill in all fields")
                         elif new_password != confirm_new_password:
@@ -372,16 +383,41 @@ class AuthUI:
                                 st.error(message)
 
             st.markdown("---")
-            st.markdown("### 📊 Activity History")
+            st.markdown("### :material/description: My Resume & Analysis History")
+            history = get_user_resumes_history(user_id, limit=15)
+            if history:
+                for entry in history:
+                    role_label = html.escape(str(entry.get("target_role") or "General Role"), quote=True)
+                    name_label = html.escape(str(entry.get("name") or "Untitled Resume"), quote=True)
+                    ats_txt = f"{entry['ats_score']:.1f}%" if entry.get("ats_score") is not None else "Builder Draft"
+                    created_txt = html.escape(str(entry.get("created_at") or "")[:16], quote=True)
+                    st.markdown(
+                        f"""
+                        <div style="padding: 10px 12px; margin: 6px 0; background: #1f2937; border-radius: 8px; border-left: 4px solid #38bdf8;">
+                            <strong>{name_label}</strong> &middot; {role_label}
+                            <span style="float: right; color: #34d399; font-weight: 600;">{ats_txt}</span>
+                            <br><small style="color: #9ca3af;">Saved: {created_txt}</small>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No saved resumes or analyses yet. Analyze or build a resume while signed in to save it here.")
+
+            st.markdown("---")
+            st.markdown("### :material/history: Activity History")
 
             activities = self.auth_manager.get_user_activity(user_id, limit=10)
 
             if activities:
                 for activity in activities:
+                    act_type = html.escape(str(activity['type']).title(), quote=True)
+                    act_ts = html.escape(str(activity['timestamp'])[:19], quote=True)
+                    act_details = html.escape(str(activity['details'] or 'No details available'), quote=True)
                     st.markdown(f"""
                     <div style="padding: 10px; margin: 5px 0; background: #262626; border-radius: 8px; border-left: 4px solid #14b8a6;">
-                        <strong>{activity['type'].title()}</strong> - {activity['timestamp'][:19]}
-                        <br><small>{activity['details'] or 'No details available'}</small>
+                        <strong>{act_type}</strong> - {act_ts}
+                        <br><small>{act_details}</small>
                     </div>
                     """, unsafe_allow_html=True)
             else:
@@ -390,15 +426,25 @@ class AuthUI:
             st.markdown("---")
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
-                if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+                if st.button("Logout", icon=":material/logout:", width="stretch", type="secondary"):
                     success, message = self.auth_manager.logout_user(
                         session_token=st.session_state.get('session_token'),
                         user_id=st.session_state.get('user_id'),
                         ip_address=st.session_state.get('ip_address', 'unknown'),
                     )
                     if success:
-                        for key in list(st.session_state.keys()):
-                            del st.session_state[key]
+                        for auth_key in (
+                            'authenticated',
+                            'username',
+                            'email',
+                            'full_name',
+                            'session_token',
+                            'redirect_to',
+                        ):
+                            st.session_state.pop(auth_key, None)
+                        st.session_state['user_id'] = 'default_user'
+                        st.session_state['page'] = 'home'
+                        st.session_state['initial_load'] = True
                         st.success(message)
                         st.rerun()
                     else:
@@ -436,16 +482,16 @@ class AuthUI:
         col1, col2, col3 = st.columns([1, 2, 1])
 
         with col2:
-            st.markdown("### 🔒 Protected Content")
+            st.markdown("### :material/lock: Protected Content")
             st.info("This page requires you to be logged in. Please login or create an account to continue.")
 
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("🔐 Login", use_container_width=True):
+                if st.button("Login", icon=":material/login:", width="stretch"):
                     st.session_state['page'] = 'login'
                     st.rerun()
 
             with col2:
-                if st.button("📝 Sign Up", use_container_width=True):
+                if st.button("Sign Up", icon=":material/person_add:", width="stretch"):
                     st.session_state['page'] = 'signup'
                     st.rerun()

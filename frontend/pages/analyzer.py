@@ -1,8 +1,8 @@
 """Standard and AI Resume Analyzer page view."""
 
 from datetime import datetime, timedelta
-import traceback
-import numpy as np
+import html
+import logging
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -18,12 +18,13 @@ from backend.config.courses import (
 )
 from backend.database.connection import (
     get_detailed_ai_analysis_stats,
-    reset_ai_analysis_stats,
     save_ai_analysis_data,
     save_analysis_data,
     save_resume_data,
 )
 from frontend.components.ui_components import apply_modern_styles, page_header
+
+logger = logging.getLogger(__name__)
 
 
 def _st_notifier(level, message):
@@ -118,9 +119,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
         if uploaded_file:
             analyze_standard = st.button(
-                "🔍 Analyze My Resume",
+                "Analyze My Resume",
+                icon=":material/manage_search:",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="analyze_standard_button",
             )
 
@@ -165,10 +167,14 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                         st.error(analysis['error'])
                         return
 
-                    st.snow()
+                    if analysis.get('document_type') != 'resume':
+                        st.error(f"This appears to be a {analysis['document_type']} document, not a resume.")
+                        st.warning("Please upload a proper resume for ATS analysis.")
+                        return
 
                     resume_data = {
                         'personal_info': {
+                            'full_name': analysis.get('name', ''),
                             'name': analysis.get('name', ''),
                             'email': analysis.get('email', ''),
                             'phone': analysis.get('phone', ''),
@@ -186,8 +192,12 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                         'template': '',
                     }
 
+                    st.session_state["last_parsed_resume"] = resume_data
+                    st.session_state["last_resume_skills"] = analysis.get("skills", [])
+                    active_uid = st.session_state.get("user_id") if st.session_state.get("authenticated") else None
+
                     try:
-                        resume_id = save_resume_data(resume_data)
+                        resume_id = save_resume_data(resume_data, user_id=active_uid)
                         analysis_data = {
                             'resume_id': resume_id,
                             'ats_score': analysis['ats_score'],
@@ -200,13 +210,8 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                         save_analysis_data(resume_id, analysis_data)
                         st.success("Resume data saved successfully!")
                     except Exception as e:
+                        logger.exception("Error saving standard analysis to database: %s", e)
                         st.error(f"Error saving to database: {str(e)}")
-                        print(f"Database error: {e}")
-
-                    if analysis.get('document_type') != 'resume':
-                        st.error(f"⚠️ This appears to be a {analysis['document_type']} document, not a resume!")
-                        st.warning("Please upload a proper resume for ATS analysis.")
-                        return
 
                 col1, col2 = st.columns(2)
 
@@ -288,39 +293,39 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
                     st.markdown("""
                     <div class="feature-card">
-                        <h2>📋 Resume Improvement Suggestions</h2>
+                        <h2><i class="fas fa-clipboard-list"></i> Resume Improvement Suggestions</h2>
                     """, unsafe_allow_html=True)
 
                     if analysis.get('contact_suggestions'):
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>📞 Contact Information</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-address-book"></i> Contact Information</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('contact_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
 
                     if analysis.get('summary_suggestions'):
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>📝 Professional Summary</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-align-left"></i> Professional Summary</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('summary_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
 
                     if analysis.get('skills_suggestions') or analysis['keyword_match']['missing_skills']:
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>🎯 Skills</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-bullseye"></i> Skills</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('skills_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         if analysis['keyword_match']['missing_skills']:
-                            st.markdown("<li style='margin-bottom: 8px;'>✓ Consider adding these relevant skills:</li>", unsafe_allow_html=True)
+                            st.markdown("<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> Consider adding these relevant skills:</li>", unsafe_allow_html=True)
                             for skill in analysis['keyword_match']['missing_skills']:
                                 st.markdown(f"<li style='margin-left: 20px; margin-bottom: 4px;'>• {skill}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
@@ -328,38 +333,38 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                     if analysis.get('experience_suggestions'):
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>💼 Work Experience</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-briefcase"></i> Work Experience</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('experience_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
 
                     if analysis.get('education_suggestions'):
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>🎓 Education</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-graduation-cap"></i> Education</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('education_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
 
                     if analysis.get('format_suggestions'):
                         st.markdown("""
                         <div style='background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 10px 0;'>
-                            <h3 style='color: #4CAF50; margin-bottom: 10px;'>📄 Formatting</h3>
+                            <h3 style='color: #4CAF50; margin-bottom: 10px;'><i class="fas fa-file-alt"></i> Formatting</h3>
                             <ul style='list-style-type: none; padding-left: 0;'>
                         """, unsafe_allow_html=True)
                         for suggestion in analysis.get('format_suggestions', []):
-                            st.markdown(f"<li style='margin-bottom: 8px;'>✓ {suggestion}</li>", unsafe_allow_html=True)
+                            st.markdown(f"<li style='margin-bottom: 8px;'><i class='fas fa-check' style='color:#4CAF50;'></i> {suggestion}</li>", unsafe_allow_html=True)
                         st.markdown("</ul></div>", unsafe_allow_html=True)
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
                 st.markdown("""
                     <div class="feature-card">
-                        <h2>📚 Recommended Courses</h2>
+                        <h2><i class="fas fa-book"></i> Recommended Courses</h2>
                     """, unsafe_allow_html=True)
 
                 courses = get_courses_for_role(selected_role)
@@ -381,7 +386,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
                 st.markdown("""
                     <div class="feature-card">
-                        <h2>📺 Helpful Videos</h2>
+                        <h2><i class="fas fa-play-circle"></i> Helpful Videos</h2>
                     """, unsafe_allow_html=True)
 
                 tab1, tab2 = st.tabs(["Resume Tips", "Interview Tips"])
@@ -440,23 +445,8 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
             </div>
             """, unsafe_allow_html=True)
 
-        with st.expander("📊 AI Analyzer Statistics", expanded=False):
+        with st.expander("AI Analyzer Statistics", icon=":material/analytics:", expanded=False):
             try:
-                if st.session_state.get('is_admin', False):
-                    if st.button(
-                        "🔄 Reset AI Analysis Statistics",
-                        type="secondary",
-                        key="reset_ai_stats_button_2",
-                    ):
-                        result = reset_ai_analysis_stats()
-                        if result["success"]:
-                            st.success(result["message"])
-                        else:
-                            st.error(result["message"])
-                        rerun_fn = getattr(st, "rerun", getattr(st, "experimental_rerun", None))
-                        if rerun_fn:
-                            rerun_fn()
-
                 ai_stats = get_detailed_ai_analysis_stats()
 
                 if ai_stats["total_analyses"] > 0:
@@ -540,10 +530,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                             margin=dict(l=10, r=10, t=30, b=10),
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                     if ai_stats["model_usage"]:
-                        st.markdown("### 🤖 Model Usage")
+                        st.markdown("### :material/smart_toy: Model Usage")
                         model_data = pd.DataFrame(ai_stats["model_usage"])
 
                         fig = px.pie(
@@ -583,10 +573,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                             },
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                     if ai_stats["top_job_roles"]:
-                        st.markdown("### 🎯 Top Job Roles")
+                        st.markdown("### :material/work: Top Job Roles")
                         roles_data = pd.DataFrame(ai_stats["top_job_roles"])
 
                         fig = px.bar(
@@ -623,25 +613,17 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                             coloraxis_showscale=False,
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
-                        st.markdown("### 📈 Analysis Trend")
-                        st.info("This is a conceptual visualization. To implement actual time-based analysis, additional data collection would be needed.")
+                        st.markdown("### :material/trending_up: Analysis Trend")
 
                         today = datetime.now()
-                        dates = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
-                        dates.reverse()
-
-                        total = ai_stats["total_analyses"]
-                        if total > 7:
-                            values = np.random.dirichlet(np.ones(7)) * total
-                            values = [round(v) for v in values]
-                            diff = total - sum(values)
-                            values[-1] += diff
-                        else:
-                            values = [0] * 7
-                            for i in range(total):
-                                values[-(i % 7) - 1] += 1
+                        dates = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6, -1, -1)]
+                        daily_counts = {
+                            item["date"]: item["count"]
+                            for item in ai_stats.get("daily_trend", [])
+                        }
+                        values = [daily_counts.get(d, 0) for d in dates]
 
                         trend_data = pd.DataFrame({'Date': dates, 'Analyses': values})
 
@@ -677,12 +659,12 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                             yaxis=dict(title="Number of Analyses", gridcolor="rgba(255, 255, 255, 0.1)"),
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                     if ai_stats["score_distribution"]:
                         st.markdown("""
                         <h3 style='text-align: center; margin-bottom: 20px; background: linear-gradient(90deg, #4b6cb7, #182848); padding: 15px; border-radius: 10px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.2);'>
-                            📊 Score Distribution Analysis
+                            <i class="fas fa-chart-bar"></i> Score Distribution Analysis
                         </h3>
                         """, unsafe_allow_html=True)
 
@@ -773,7 +755,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                         <div style='background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 20px; border-radius: 15px; margin: 10px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.2);'>
                         """, unsafe_allow_html=True)
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                         st.markdown("""
                         <p style='color: white; text-align: center; font-style: italic; margin-top: 10px;'>
@@ -785,7 +767,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                     if ai_stats["recent_analyses"]:
                         st.markdown("""
                         <h3 style='text-align: center; margin-bottom: 20px; background: linear-gradient(90deg, #4b6cb7, #182848); padding: 15px; border-radius: 10px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.2);'>
-                            🕒 Recent Resume Analyses
+                            <i class="fas fa-clock"></i> Recent Resume Analyses
                         </h3>
                         """, unsafe_allow_html=True)
 
@@ -916,10 +898,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
                             st.markdown(f"""
                             <tr>
-                                <td><div class="model-badge {model_class}">{model_name}</div></td>
+                                <td><div class="model-badge {model_class}">{html.escape(str(model_name))}</div></td>
                                 <td><div class="score-pill {score_class}">{score}/100</div></td>
-                                <td><div class="role-badge">{analysis["job_role"]}</div></td>
-                                <td><div class="date-badge">{formatted_date}</div></td>
+                                <td><div class="role-badge">{html.escape(str(analysis["job_role"]))}</div></td>
+                                <td><div class="date-badge">{html.escape(str(formatted_date))}</div></td>
                             </tr>
                             """, unsafe_allow_html=True)
 
@@ -965,9 +947,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
             )
         else:
             analyze_ai = st.button(
-                "🤖 Analyze with AI",
+                "Analyze with AI",
+                icon=":material/smart_toy:",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 key="analyze_ai_button",
             )
 
@@ -985,7 +968,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                         st.stop()
 
                     try:
-                        with st.spinner("🧠 AI is analyzing your resume..."):
+                        with st.spinner("AI is analyzing your resume..."):
                             progress_bar = st.progress(0)
                             selected_model = "Google Gemini"
                             progress_bar.progress(10)
@@ -1020,6 +1003,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
                             if analysis_result and "error" not in analysis_result:
                                 resume_score = analysis_result.get("resume_score", 0)
+                                active_uid = st.session_state.get("user_id") if st.session_state.get("authenticated") else None
                                 save_ai_analysis_data(
                                     None,
                                     {
@@ -1027,13 +1011,16 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                         "resume_score": resume_score,
                                         "job_role": job_role,
                                     },
+                                    user_id=active_uid,
                                 )
 
-                            st.snow()
                             progress_bar.progress(100)
 
                             if analysis_result and "error" not in analysis_result:
-                                st.success("✅ Analysis complete!")
+                                if analysis_result.get("fallback_used") or analysis_result.get("analysis_mode") == "deterministic_fallback":
+                                    st.info("Analyzed using deterministic local ATS heuristics (configure `GOOGLE_API_KEY` or `OPENROUTER_API_KEY` for live LLM review).")
+                                else:
+                                    st.success("Analysis complete.")
 
                                 full_response = analysis_result.get("analysis", "")
                                 resume_score = analysis_result.get("resume_score", 0)
@@ -1041,6 +1028,10 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                 model_used = analysis_result.get("model_used", selected_model)
 
                                 st.session_state['full_analysis'] = full_response
+                                st.session_state['last_ai_resume_text'] = resume_text
+                                st.session_state['last_ai_structured'] = analysis_result.get("structured") or {}
+                                st.session_state['last_ai_job_role'] = job_role
+                                st.session_state['last_ai_job_desc'] = custom_job_description if st.session_state.get('used_custom_job_desc') else ""
 
                                 st.markdown("## Full Analysis Report")
                                 current_date = datetime.now().strftime("%B %d, %Y")
@@ -1050,13 +1041,15 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                     <h2 style="color: #ffffff; margin-bottom: 10px;">AI Resume Analysis Report</h2>
                                     <div style="display: flex; flex-wrap: wrap; gap: 20px;">
                                         <div style="flex: 1; min-width: 200px;">
-                                            <p style="color: #ffffff;"><strong>Job Role:</strong> {job_role if job_role else "Not specified"}</p>
+                                            <p style="color: #ffffff;"><strong>Job Role:</strong> {html.escape(str(job_role)) if job_role else "Not specified"}</p>
                                             <p style="color: #ffffff;"><strong>Analysis Date:</strong> {current_date}</p>
                                         </div>
                                         <div style="flex: 1; min-width: 200px;">
-                                            <p style="color: #ffffff;"><strong>AI Model:</strong> {model_used}</p>
+                                            <p style="color: #ffffff;"><strong>AI Model:</strong> {html.escape(str(model_used))}</p>
                                             <p style="color: #ffffff;"><strong>Overall Score:</strong> {resume_score}/100 - {"Excellent" if resume_score >= 80 else "Good" if resume_score >= 60 else "Needs Improvement"}</p>
-                                            {f'<p style="color: #4CAF50;"><strong>✓ Custom Job Description Used</strong></p>' if st.session_state.get('used_custom_job_desc', False) else ''}
+                                            {f'<p style="color: #4CAF50;"><strong><i class="fas fa-check-circle"></i> Custom Job Description Used</strong></p>' if st.session_state.get('used_custom_job_desc', False) else ''}
+                                        </div>
+                                    </div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
@@ -1089,7 +1082,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                     ))
 
                                     fig1.update_layout(height=250, margin=dict(l=20, r=20, t=50, b=20))
-                                    st.plotly_chart(fig1, use_container_width=True)
+                                    st.plotly_chart(fig1, width="stretch")
 
                                     status = "Excellent" if resume_score >= 80 else "Good" if resume_score >= 60 else "Needs Improvement"
                                     st.markdown(f"<div style='text-align: center; font-weight: bold;'>{status}</div>", unsafe_allow_html=True)
@@ -1121,7 +1114,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                     ))
 
                                     fig2.update_layout(height=250, margin=dict(l=20, r=20, t=50, b=20))
-                                    st.plotly_chart(fig2, use_container_width=True)
+                                    st.plotly_chart(fig2, width="stretch")
 
                                     status = "Excellent" if ats_score >= 80 else "Good" if ats_score >= 60 else "Needs Improvement"
                                     st.markdown(f"<div style='text-align: center; font-weight: bold;'>{status}</div>", unsafe_allow_html=True)
@@ -1167,7 +1160,7 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                             ))
 
                                             fig3.update_layout(height=250, margin=dict(l=20, r=20, t=50, b=20))
-                                            st.plotly_chart(fig3, use_container_width=True)
+                                            st.plotly_chart(fig3, width="stretch")
 
                                             match_status = "Excellent Match" if job_match_score >= 80 else "Good Match" if job_match_score >= 60 else "Low Match"
                                             st.markdown(f"<div style='text-align: center; font-weight: bold;'>{match_status}</div>", unsafe_allow_html=True)
@@ -1185,7 +1178,57 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
                                             </div>
                                             """, unsafe_allow_html=True)
 
-                                formatted_analysis = full_response
+                                structured = analysis_result.get("structured") or {}
+                                if structured:
+                                    st.markdown("### :material/fact_check: Structured ATS Gap Matrix")
+                                    sec_scores = structured.get("section_scores", {})
+                                    if sec_scores:
+                                        sec_cols = st.columns(len(sec_scores))
+                                        for idx, (sec_name, sec_val) in enumerate(sec_scores.items()):
+                                            with sec_cols[idx]:
+                                                st.metric(sec_name, f"{sec_val}%")
+
+                                    matched_kw = structured.get("matched_keywords", [])
+                                    missing_kw = structured.get("missing_keywords", [])
+                                    kw_col1, kw_col2 = st.columns(2)
+                                    with kw_col1:
+                                        matched_pills = " ".join(
+                                            f"<span style='display:inline-block;margin:3px;padding:4px 10px;border-radius:999px;background:rgba(16,185,129,0.18);color:#34d399;border:1px solid rgba(16,185,129,0.4);font-size:0.85rem;'>{html.escape(str(k), quote=True)}</span>"
+                                            for k in matched_kw
+                                        ) or "<span style='color:#94a3b8;'>No target keywords detected yet</span>"
+                                        st.markdown(
+                                            f"<div style='background:#1e293b;padding:14px;border-radius:10px;'><strong><i class='fas fa-check-circle' style='color:#34d399;'></i> Matched Keywords ({len(matched_kw)})</strong><div style='margin-top:8px;'>{matched_pills}</div></div>",
+                                            unsafe_allow_html=True,
+                                        )
+                                    with kw_col2:
+                                        missing_pills = " ".join(
+                                            f"<span style='display:inline-block;margin:3px;padding:4px 10px;border-radius:999px;background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.4);font-size:0.85rem;'>{html.escape(str(k), quote=True)}</span>"
+                                            for k in missing_kw
+                                        ) or "<span style='color:#34d399;'>Strong coverage across all detected keywords</span>"
+                                        st.markdown(
+                                            f"<div style='background:#1e293b;padding:14px;border-radius:10px;'><strong><i class='fas fa-exclamation-triangle' style='color:#fbbf24;'></i> Missing / Priority Keywords ({len(missing_kw)})</strong><div style='margin-top:8px;'>{missing_pills}</div></div>",
+                                            unsafe_allow_html=True,
+                                        )
+
+                                    suggested_rewrites = structured.get("bullet_rewrites", [])
+                                    if suggested_rewrites:
+                                        st.markdown("### :material/auto_fix_high: Suggested Bullet Upgrades")
+                                        for rw in suggested_rewrites:
+                                            orig_esc = html.escape(str(rw.get("original", "")), quote=True)
+                                            imp_esc = html.escape(str(rw.get("improved", "")), quote=True)
+                                            reason_esc = html.escape(str(rw.get("reason", "")), quote=True)
+                                            st.markdown(
+                                                f"""
+                                                <div style="background:#1e293b;padding:12px 14px;border-radius:8px;margin-bottom:8px;border-left:4px solid #38bdf8;">
+                                                    <div style="color:#94a3b8;font-size:0.85rem;"><strong>Original:</strong> {orig_esc}</div>
+                                                    <div style="color:#e2e8f0;margin-top:4px;"><strong>Improved:</strong> {imp_esc}</div>
+                                                    <div style="color:#38bdf8;font-size:0.8rem;margin-top:4px;">{reason_esc}</div>
+                                                </div>
+                                                """,
+                                                unsafe_allow_html=True,
+                                            )
+
+                                formatted_analysis = html.escape(full_response)
 
                                 section_styles = {
                                     "## Overall Assessment": """<div class="report-section">
@@ -1336,19 +1379,45 @@ def render_analyzer(analyzer, ai_analyzer, job_roles):
 
                                 if pdf_buffer:
                                     st.download_button(
-                                        label="📊 Download PDF Report",
+                                        label="Download PDF Report",
+                                        icon=":material/download:",
                                         data=pdf_buffer,
                                         file_name=f"resume_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                                         mime="application/pdf",
-                                        use_container_width=True,
-                                        on_click=lambda: st.balloons(),
+                                        width="stretch",
                                     )
                                 else:
                                     st.error("PDF generation failed. Please try again later.")
                             else:
                                 st.error(f"Analysis failed: {analysis_result.get('error', 'Unknown error')}")
                     except Exception as ai_error:
+                        logger.exception("Error during AI analysis: %s", ai_error)
                         st.error(f"Error during AI analysis: {str(ai_error)}")
-                        st.code(traceback.format_exc())
 
-    st.toast("Check out these repositories: [Awesome Java](https://github.com/latamishra5/Awesome-Java)", icon="ℹ️")
+            st.markdown("---")
+            with st.expander(":material/auto_fix_high: AI Bullet Point Rewriter (STAR Optimizer)"):
+                st.caption("Paste 1 to 6 experience bullets to strengthen action verbs and measurable impact phrasing.")
+                bullet_input = st.text_area(
+                    "Bullet points to rewrite (one per line)",
+                    placeholder="- Worked on backend API endpoints for user dashboard\n- Responsible for testing database migrations",
+                    height=120,
+                    key="ai_bullet_rewrite_input",
+                )
+                if st.button("Rewrite Bullets", icon=":material/auto_fix_high:", key="run_bullet_rewrite_btn"):
+                    if not bullet_input.strip():
+                        st.warning("Enter at least one bullet point to rewrite.")
+                    else:
+                        rewriter = AIResumeAnalyzer(notifier=_st_notifier)
+                        rewrites = rewriter.rewrite_resume_bullets(
+                            bullet_input,
+                            job_role=st.session_state.get("last_ai_job_role") or selected_role,
+                            job_description=custom_job_description if use_custom_job_desc else None,
+                        )
+                        if rewrites:
+                            for idx, rw in enumerate(rewrites, 1):
+                                st.markdown(f"**Bullet {idx}**")
+                                st.caption(f"Original: {rw.get('original', '')}")
+                                st.success(rw.get("improved", ""))
+                                st.caption(f"Why it improves ATS impact: {rw.get('reason', '')}")
+                        else:
+                            st.info("Could not parse bullet points. Add one bullet per line.")

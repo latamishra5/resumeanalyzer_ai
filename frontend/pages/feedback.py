@@ -125,27 +125,30 @@ class FeedbackManager:
             """, unsafe_allow_html=True)
 
         st.markdown('<div class="feedback-container">', unsafe_allow_html=True)
-        st.markdown('<h2 class="feedback-header">📝 Share Your Feedback</h2>', unsafe_allow_html=True)
+        st.markdown('<h2 class="feedback-header"><i class="fas fa-comment-dots"></i> Share Your Feedback</h2>', unsafe_allow_html=True)
+
+        def _star_icons(count: int) -> str:
+            return " ".join('<i class="fas fa-star" style="color: #f59e0b;"></i>' for _ in range(int(count)))
 
         # Overall Rating
         st.markdown('<div class="feedback-section">', unsafe_allow_html=True)
         st.markdown('<label class="feedback-label">Overall Experience Rating</label>', unsafe_allow_html=True)
         rating = st.slider("Overall Rating", 1, 5, 5, help="Rate your overall experience with the app", label_visibility="collapsed")
-        st.markdown(f'<div class="rating-container">{"⭐" * rating}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="rating-container">{_star_icons(rating)}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Usability Score
         st.markdown('<div class="feedback-section">', unsafe_allow_html=True)
         st.markdown('<label class="feedback-label">How easy was it to use our app?</label>', unsafe_allow_html=True)
         usability_score = st.slider("Usability Score", 1, 5, 5, help="Rate the app\'s ease of use", label_visibility="collapsed")
-        st.markdown(f'<div class="rating-container">{"⭐" * usability_score}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="rating-container">{_star_icons(usability_score)}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Feature Satisfaction
         st.markdown('<div class="feedback-section">', unsafe_allow_html=True)
         st.markdown('<label class="feedback-label">How satisfied are you with our features?</label>', unsafe_allow_html=True)
         feature_satisfaction = st.slider("Feature Satisfaction", 1, 5, 5, help="Rate your satisfaction with the app\'s features", label_visibility="collapsed")
-        st.markdown(f'<div class="rating-container">{"⭐" * feature_satisfaction}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="rating-container">{_star_icons(feature_satisfaction)}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Text Feedback
@@ -161,23 +164,8 @@ class FeedbackManager:
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Submit Button
-        if st.button("Submit Feedback", key="submit_feedback"):
+        if st.button("Submit Feedback", key="submit_feedback", type="primary"):
             try:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                for i in range(100):
-                    progress_bar.progress(i + 1)
-                    if i < 30:
-                        status_text.text("Processing feedback... 📝")
-                    elif i < 60:
-                        status_text.text("Analyzing responses... 🔍")
-                    elif i < 90:
-                        status_text.text("Saving to database... 💾")
-                    else:
-                        status_text.text("Finalizing... ✨")
-                    time.sleep(0.01)
-
                 feedback_data = {
                     'rating': rating,
                     'usability_score': usability_score,
@@ -186,22 +174,10 @@ class FeedbackManager:
                     'improvement_suggestions': improvement_suggestions,
                     'user_experience': user_experience,
                 }
-                self.save_feedback(feedback_data)
+                with st.spinner("Saving feedback..."):
+                    self.save_feedback(feedback_data)
 
-                progress_bar.empty()
-                status_text.empty()
-
-                success_container = st.empty()
-                success_container.markdown("""
-                    <div style="text-align: center; padding: 20px; background: linear-gradient(90deg, rgba(76, 175, 80, 0.1), rgba(33, 150, 243, 0.1)); border-radius: 10px;">
-                        <h2 style="color: #4CAF50;">Thank You! 🎉</h2>
-                        <p style="color: #E0E0E0;">Your feedback helps us improve Smart Resume AI</p>
-                    </div>
-                """, unsafe_allow_html=True)
-
-                st.balloons()
-                time.sleep(2)
-
+                st.success("Thank you for your feedback! It helps improve Resume Analyzer(AI).")
             except Exception as e:
                 st.error(f"Error submitting feedback: {str(e)}")
 
@@ -210,17 +186,17 @@ class FeedbackManager:
         stats = self.get_feedback_stats()
 
         st.markdown("""
-            <div style="text-align: center; padding: 15px; background: linear-gradient(90deg, rgba(76, 175, 80, 0.1), rgba(33, 150, 243, 0.1)); border-radius: 10px; margin-bottom: 20px;">
-                <h3 style="color: #E0E0E0;">Feedback Overview 📊</h3>
+            <div style="text-align: center; padding: 15px; background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(6, 182, 212, 0.12)); border-radius: 10px; margin-bottom: 20px;">
+                <h3 style="color: #E0E0E0;"><i class="fas fa-chart-bar"></i> Feedback Overview</h3>
             </div>
         """, unsafe_allow_html=True)
 
         cols = st.columns(4)
         metrics = [
-            {"label": "Total Responses", "value": f"{stats['total_responses']:,}", "delta": "↗"},
-            {"label": "Avg Rating", "value": f"{stats['avg_rating']:.1f}/5.0", "delta": "⭐"},
-            {"label": "Usability Score", "value": f"{stats['avg_usability']:.1f}/5.0", "delta": "🎯"},
-            {"label": "Satisfaction", "value": f"{stats['avg_satisfaction']:.1f}/5.0", "delta": "😊"},
+            {"label": "Total Responses", "value": f"{stats['total_responses']:,}", "delta": '<i class="fas fa-users"></i>'},
+            {"label": "Avg Rating", "value": f"{stats['avg_rating']:.1f}/5.0", "delta": '<i class="fas fa-star" style="color: #f59e0b;"></i>'},
+            {"label": "Usability Score", "value": f"{stats['avg_usability']:.1f}/5.0", "delta": '<i class="fas fa-sliders-h"></i>'},
+            {"label": "Satisfaction", "value": f"{stats['avg_satisfaction']:.1f}/5.0", "delta": '<i class="fas fa-smile"></i>'},
         ]
 
         for col, metric in zip(cols, metrics):
@@ -250,5 +226,3 @@ def render_feedback_page():
 
     with stats_tab:
         feedback_manager.render_feedback_stats()
-
-    st.toast("Check out these repositories: [TryHackMe Free Rooms](https://github.com/latamishra5/tryhackme-free-rooms)", icon="ℹ️")

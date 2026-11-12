@@ -98,8 +98,29 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env file with your API keys
 
-# 5. Run the application
+# 5. Run the public frontend application
 streamlit run app.py
+
+# 6. Run the isolated backend admin portal (separate port)
+python run_admin.py
+```
+
+### Method 2: Docker & PostgreSQL (Production Local/Cloud)
+
+```bash
+cp .env.example .env
+# Set POSTGRES_PASSWORD, GOOGLE_API_KEY, and optional ADMIN_EMAIL / ADMIN_PASSWORD
+docker compose up --build
+```
+
+- **Public Frontend**: `http://localhost:8501`
+- **Backend Admin Portal**: `http://localhost:8502`
+- **Render Blueprint**: Deploy directly via `render.yaml` with managed PostgreSQL (`DATABASE_URL`).
+
+### Running Tests
+
+```bash
+pytest -v
 ```
 
 ### Method 2: One-Click Deployment
@@ -244,19 +265,21 @@ sqlite3.OperationalError: no such table
 
 ```
 resumeanalyzer_ai/
-├── 📄 app.py                        # Root Streamlit entrypoint
-├── 📄 run_app.py                    # Application launcher
+├── 📄 app.py                        # Root public frontend Streamlit entrypoint
+├── 📄 run_app.py                    # Public application launcher
+├── 📄 run_admin.py                  # Standalone Backend Admin Portal launcher (port 8502)
 ├── 📄 requirements.txt              # Python dependencies
 ├── 📄 .env.example                  # Environment variables template
 ├── 📄 README.md                     # Project documentation
-├── 📁 frontend/                     # Streamlit UI layer
+├── 📁 frontend/                     # Public Streamlit UI layer (no admin login)
 │   ├── 📄 app.py                    # App coordinator, navigation & sidebar
 │   ├── 📁 pages/                    # Page views (home, analyzer, builder, dashboard, job_search, feedback, about)
 │   ├── 📁 components/               # Reusable UI components & auth UI
 │   ├── 📁 styles/
 │   │   └── 📄 style.css             # Main styles
 │   └── 📁 assets/                   # UI static assets
-├── 📁 backend/                      # Pure-Python business logic & data layer
+├── 📁 backend/                      # Business logic, data layer & backend Admin Portal
+│   ├── 📁 admin/                    # Dedicated Admin Portal (auth, service, Streamlit console)
 │   ├── 📁 config/                   # Paths, settings, courses & job roles
 │   ├── 📁 database/                 # SQLite connections, SQLAlchemy models & schemas
 │   ├── 📁 auth/                     # Authentication & session service

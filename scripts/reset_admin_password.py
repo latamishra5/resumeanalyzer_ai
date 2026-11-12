@@ -4,6 +4,7 @@ Admin Password Reset Script for Resume Analyzer AI
 This script will remove existing admin credentials and create a new admin account.
 """
 
+from getpass import getpass
 from pathlib import Path
 import sys
 
@@ -11,61 +12,43 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from backend.database.connection import get_database_connection
+from backend.admin.service import AdminService
 
 
 def reset_admin_password():
-    """Reset admin password by removing old admin and creating new one"""
+    """Reset admin password by removing old admin and creating a hashed one."""
+    service = AdminService()
 
-    conn = get_database_connection()
-    cursor = conn.cursor()
+    print("\n" + "=" * 50)
+    print("CREATE NEW ADMIN ACCOUNT")
+    print("=" * 50)
 
-    try:
-        cursor.execute("DELETE FROM admin")
-        print("Old admin records deleted successfully.")
-
-        print("\n" + "=" * 50)
-        print("CREATE NEW ADMIN ACCOUNT")
-        print("=" * 50)
-
+    email = input("Enter admin email: ").strip()
+    while not email:
+        print("Email cannot be empty!")
         email = input("Enter admin email: ").strip()
-        while not email:
-            print("Email cannot be empty!")
-            email = input("Enter admin email: ").strip()
 
-        password = input("Enter new admin password: ").strip()
-        while not password or len(password) < 4:
-            print("Password must be at least 4 characters long!")
-            password = input("Enter new admin password: ").strip()
+    password = getpass("Enter new admin password (min 8 chars): ").strip()
+    while not password or len(password) < 8:
+        print("Password must be at least 8 characters long!")
+        password = getpass("Enter new admin password (min 8 chars): ").strip()
 
-        confirm_password = input("Confirm password: ").strip()
-        while password != confirm_password:
-            print("Passwords do not match!")
-            confirm_password = input("Confirm password: ").strip()
+    confirm_password = getpass("Confirm password: ").strip()
+    while password != confirm_password:
+        print("Passwords do not match!")
+        confirm_password = getpass("Confirm password: ").strip()
 
-        cursor.execute("INSERT INTO admin (email, password) VALUES (?, ?)", (email, password))
-        conn.commit()
-
+    ok, msg = service.replace_with_single_admin(email, password)
+    if ok:
+        service.log_admin_action(email, "Password reset - New admin created")
         print(f"\n{'=' * 50}")
         print("ADMIN ACCOUNT CREATED SUCCESSFULLY!")
         print(f"{'=' * 50}")
         print(f"Email: {email}")
-        print(f"Password: {password}")
         print(f"{'=' * 50}")
-        print("\nYou can now login with these credentials.")
-        print("Please keep your password safe!")
-
-        cursor.execute(
-            "INSERT INTO admin_logs (admin_email, action) VALUES (?, ?)",
-            (email, "Password reset - New admin created"),
-        )
-        conn.commit()
-
-    except Exception as e:
-        print(f"Error resetting admin password: {str(e)}")
-        conn.rollback()
-    finally:
-        conn.close()
+        print("\nSign in via the Backend Admin Portal (python run_admin.py).")
+    else:
+        print(f"Error resetting admin password: {msg}")
 
 
 if __name__ == "__main__":

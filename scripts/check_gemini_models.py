@@ -12,7 +12,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 from backend.config.settings import ENV_PATH
 
@@ -30,30 +30,34 @@ def check_available_models():
         return
 
     try:
-        genai.configure(api_key=google_api_key)
+        client = genai.Client(api_key=google_api_key)
 
         print("Available Gemini models:")
         print("=" * 50)
 
-        for model in genai.list_models():
-            if 'generateContent' in model.supported_generation_methods:
+        for model in client.models.list():
+            actions = getattr(model, "supported_actions", None) or []
+            if not actions or "generateContent" in actions:
                 print(f"- {model.name}")
 
         print("=" * 50)
 
         working_models = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
             "gemini-1.0-pro",
             "gemini-pro",
-            "gemini-pro-vision",
-            "text-bison-001",
-            "chat-bison-001",
         ]
 
         print("\nTesting common models:")
         for model_name in working_models:
             try:
-                model = genai.GenerativeModel(model_name)
-                _response = model.generate_content("Hello")
+                _response = client.models.generate_content(
+                    model=model_name,
+                    contents="Hello",
+                )
                 print(f"  {model_name}: WORKING")
                 break
             except Exception as e:

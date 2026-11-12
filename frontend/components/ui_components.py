@@ -47,36 +47,6 @@ def feature_card(icon, title, description):
         </div>
     """, unsafe_allow_html=True)
 
-def about_section(content, image_path=None, social_links=None):
-    """Render a modern about section with profile image and social links"""
-    st.markdown("""
-        <div class="glass-card about-section">
-            <div class="profile-section">
-    """, unsafe_allow_html=True)
-    
-    # Profile Image
-    if image_path:
-        st.image(image_path, use_column_width=False, width=200)
-    
-    # Image Upload
-    uploaded_file = st.file_uploader("Upload profile picture", type=['png', 'jpg', 'jpeg'])
-    if uploaded_file is not None:
-        st.image(uploaded_file, use_column_width=False, width=200)
-    
-    # Social Links
-    if social_links:
-        st.markdown('<div class="social-links">', unsafe_allow_html=True)
-        for platform, url in social_links.items():
-            st.markdown(f'<a href="{url}" target="_blank" class="social-link"><i class="fab fa-{platform.lower()}"></i></a>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # About Content
-    st.markdown(f"""
-            </div>
-            <div class="about-content">{content}</div>
-        </div>
-    """, unsafe_allow_html=True)
-
 def metric_card(label, value, delta=None, icon=None):
     """Render a modern metric card with animations"""
     icon_html = f'<i class="{icon}"></i>' if icon else ''
@@ -107,9 +77,9 @@ def template_card(title, description, image_url=None):
     """, unsafe_allow_html=True)
 
 def feedback_card(name, feedback, rating):
-    """Render a modern feedback card with rating stars"""
-    stars = "⭐" * int(rating)
-    
+    """Render a modern feedback card with vector Font Awesome rating stars"""
+    stars = '<i class="fas fa-star" style="color: #f59e0b;"></i> ' * int(rating)
+
     st.markdown(f"""
         <div class="card feedback-card">
             <div class="feedback-header">
@@ -184,16 +154,16 @@ def grid_layout(*elements):
 def alert(message, type="info"):
     """Display a modern alert message"""
     alert_types = {
-        "info": ("ℹ️", "var(--accent-color)"),
-        "success": ("✅", "var(--success-color)"),
-        "warning": ("⚠️", "var(--warning-color)"),
-        "error": ("❌", "var(--error-color)")
+        "info": ('<i class="fas fa-info-circle"></i>', "var(--accent-color)"),
+        "success": ('<i class="fas fa-check-circle"></i>', "var(--success-color)"),
+        "warning": ('<i class="fas fa-exclamation-triangle"></i>', "var(--warning-color)"),
+        "error": ('<i class="fas fa-times-circle"></i>', "var(--error-color)"),
     }
     icon, color = alert_types.get(type, alert_types["info"])
-    
+
     st.markdown(f"""
         <div class="alert alert-{type}">
-            <span class="alert-icon">{icon}</span>
+            <span class="alert-icon" style="color: {color};">{icon}</span>
             <span class="alert-message">{message}</span>
         </div>
     """, unsafe_allow_html=True)

@@ -1,10 +1,12 @@
 """Job search and LinkedIn scraper page views."""
 
+import html
 import streamlit as st
 from streamlit_extras.add_vertical_space import add_vertical_space
 from streamlit_option_menu import option_menu
 
 from backend.jobs.companies import get_featured_companies, get_market_insights
+from backend.jobs.job_feed import compute_job_match_score, fetch_remote_jobs
 from backend.jobs.job_filters import filter_location_suggestions, get_filter_options
 from backend.jobs.job_portals import JobPortal
 from backend.jobs.linkedin_scraper import LinkedInScraperService
@@ -89,7 +91,7 @@ class LinkedInScraperUI:
             submit = st.form_submit_button(
                 label='Search LinkedIn Jobs',
                 type='primary',
-                use_container_width=True,
+                width="stretch",
             )
             add_vertical_space(1)
 
@@ -165,26 +167,27 @@ class LinkedInScraperUI:
             </style>
         """, unsafe_allow_html=True)
 
-        st.markdown(f'<div class="job-count">🎯 Found {len(df_final)} matching jobs on LinkedIn</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="job-count"><i class="fas fa-briefcase"></i> Found {len(df_final)} matching jobs on LinkedIn</div>', unsafe_allow_html=True)
 
         for i in range(len(df_final)):
-            company_name = df_final.iloc[i, 0]
-            job_title = df_final.iloc[i, 1]
-            location = df_final.iloc[i, 2]
-            url = df_final.iloc[i, 3]
+            company_name = html.escape(str(df_final.iloc[i, 0]), quote=True)
+            job_title = html.escape(str(df_final.iloc[i, 1]), quote=True)
+            location = html.escape(str(df_final.iloc[i, 2]), quote=True)
+            raw_url = str(df_final.iloc[i, 3])
+            safe_url = html.escape(raw_url, quote=True) if raw_url.startswith(("http://", "https://")) else "#"
             description = df_final.iloc[i, 4]
 
             st.markdown(f"""
                 <div class="job-card">
                     <div class="job-title">{job_title}</div>
                     <div class="company-name">{company_name}</div>
-                    <div class="job-location">📍 {location}</div>
+                    <div class="job-location"><i class="fas fa-map-marker-alt"></i> {location}</div>
                 </div>
             """, unsafe_allow_html=True)
 
             with st.expander("View Job Description"):
                 st.markdown(description)
-                st.markdown(f"<a href='{url}' target='_blank' class='job-url-button'>Apply on LinkedIn</a>", unsafe_allow_html=True)
+                st.markdown(f"<a href='{safe_url}' target='_blank' class='job-url-button'>Apply on LinkedIn</a>", unsafe_allow_html=True)
 
             st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -315,7 +318,7 @@ def render_company_section():
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("### 🏢 Featured Companies")
+    st.markdown("### :material/apartment: Featured Companies")
 
     tabs = st.tabs(["All Companies", "Tech Giants", "Indian Tech", "Global Corps"])
 
@@ -433,7 +436,7 @@ def render_market_insights():
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("### 📊 Job Market Insights")
+    st.markdown("### :material/monitoring: Job Market Insights")
 
     tabs = st.tabs(["Trending Skills", "Top Locations", "Salary Insights"])
 
@@ -494,7 +497,7 @@ def render_market_insights():
 
 def render_job_search():
     """Render job search page with enhanced features"""
-    st.title("🔍 Smart Job Search")
+    st.title("Smart Job Search")
     st.markdown("Find Your Dream Job Across Multiple Platforms")
 
     render_market_insights()
@@ -525,8 +528,8 @@ def render_job_search():
 
         tabs = option_menu(
             menu_title=None,
-            options=["Job Portal", "LinkedIn"],
-            icons=["search", "linkedin"],
+            options=["Job Portal", "Live Remote Feed", "LinkedIn"],
+            icons=["search", "globe", "linkedin"],
             menu_icon="cast",
             default_index=0,
             orientation="horizontal",
@@ -538,7 +541,99 @@ def render_job_search():
             },
         )
 
-        if tabs == "Job Portal":
+        if tabs == "Live Remote Feed":
+            st.markdown('<h3 class="search-title"><i class="fas fa-globe" style="color: #00bfa5;"></i> Live Cloud-Safe Remote Jobs &amp; Resume Match</h3>', unsafe_allow_html=True)
+            st.markdown('<p class="search-description">Search live remote listings via API (no browser automation needed) and score each job against your resume skills.</p>', unsafe_allow_html=True)
+
+            pre_skills = ", ".join(st.session_state.get("last_resume_skills") or [])
+            feed_col1, feed_col2 = st.columns([2, 2])
+            with feed_col1:
+                feed_query = st.text_input(
+                    "Role or Keyword",
+                    value="",
+                    placeholder="e.g. Python, Backend Engineer, Data Analyst",
+                    key="remote_feed_query",
+                )
+            with feed_col2:
+                candidate_skills_text = st.text_input(
+                    "Your Resume Skills (comma-separated for match %)",
+                    value=pre_skills,
+                    placeholder="e.g. Python, SQL, Docker, FastAPI",
+                    key="remote_feed_skills",
+                )
+
+            if st.button("Fetch Live Jobs", icon=":material/travel_explore:", type="primary", width="stretch", key="fetch_remote_jobs_btn"):
+                feed_result = fetch_remote_jobs(feed_query, limit=12)
+                if feed_result.get("error"):
+                    st.warning(feed_result["error"])
+                else:
+                    jobs = feed_result.get("jobs", [])
+                    if not jobs:
+                        st.info("No matching remote listings found. Try a broader role or skill term.")
+                    else:
+                        scored_jobs = []
+                        for job in jobs:
+                            match_info = compute_job_match_score(
+                                candidate_skills_text,
+                                job_title=job["title"],
+                                job_description=job["description"],
+                                job_tags=job["tags"],
+                            )
+                            scored_jobs.append((match_info, job))
+
+                        if candidate_skills_text.strip():
+                            scored_jobs.sort(key=lambda pair: pair[0]["match_score"], reverse=True)
+
+                        st.markdown(f"### :material/work: Showing {len(scored_jobs)} Live Remote Roles")
+                        for match_info, job in scored_jobs:
+                            title_esc = html.escape(job["title"], quote=True)
+                            company_esc = html.escape(job["company"], quote=True)
+                            loc_esc = html.escape(job["location"], quote=True)
+                            type_esc = html.escape(job["job_type"], quote=True)
+                            salary_esc = html.escape(job["salary"], quote=True)
+                            pub_esc = html.escape(job["published_at"], quote=True)
+                            summary_esc = html.escape(job["summary"], quote=True)
+                            url_esc = html.escape(job["url"], quote=True) if job["url"] else "#"
+
+                            score_val = match_info["match_score"]
+                            badge_color = "#10b981" if score_val >= 70 else "#f59e0b" if score_val >= 40 else "#64748b"
+                            matched_txt = ", ".join(match_info["matched_skills"])
+                            missing_txt = ", ".join(match_info["missing_skills"])
+                            match_badge = (
+                                f"<span style='float:right;background:{badge_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.82rem;font-weight:600;'>{score_val}% Skill Match</span>"
+                                if candidate_skills_text.strip()
+                                else ""
+                            )
+                            gap_line = ""
+                            if candidate_skills_text.strip():
+                                gap_parts = []
+                                if matched_txt:
+                                    gap_parts.append(f"<strong>Matched:</strong> {html.escape(matched_txt, quote=True)}")
+                                if missing_txt:
+                                    gap_parts.append(f"<strong>Missing:</strong> {html.escape(missing_txt, quote=True)}")
+                                if gap_parts:
+                                    gap_line = f"<p style='font-size:0.85rem;color:#cbd5e1;margin:6px 0;'>{' | '.join(gap_parts)}</p>"
+
+                            apply_btn = (
+                                f'<a href="{url_esc}" target="_blank" style="display:inline-block;background:#00bfa5;color:#fff;padding:5px 14px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:6px;">View Listing &rarr;</a>'
+                                if job["url"]
+                                else ""
+                            )
+                            st.markdown(
+                                f"""
+                                <div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:15px;margin-bottom:12px;border-left:4px solid #00bfa5;">
+                                    {match_badge}
+                                    <div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">{title_esc}</div>
+                                    <div style="font-size:0.88rem;color:#94a3b8;margin:4px 0;">{company_esc} &middot; {loc_esc} &middot; {type_esc} &middot; {salary_esc} {f'&middot; {pub_esc}' if pub_esc else ''}</div>
+                                    <p style="font-size:0.9rem;color:#cbd5e1;margin:6px 0;">{summary_esc}</p>
+                                    {gap_line}
+                                    {apply_btn}
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+        elif tabs == "Job Portal":
             st.markdown('<h3 class="search-title"><i class="fas fa-search-dollar" style="color: #00bfa5;"></i> Search Jobs Across Multiple Platforms</h3>', unsafe_allow_html=True)
             st.markdown('<p class="search-description">Find job opportunities from top job portals like LinkedIn, Indeed, Naukri, and Foundit</p>', unsafe_allow_html=True)
 
@@ -602,10 +697,10 @@ def render_job_search():
                             city_cols = st.columns(3)
                             for i, city in enumerate(cities):
                                 with city_cols[i % 3]:
-                                    if st.button(f"{city['icon']} {city['text']}", key=f"city_{i}"):
+                                    if st.button(city['text'], icon=city['icon'], key=f"city_{i}"):
                                         location = city['text']
 
-            with st.expander("🎯 Advanced Filters"):
+            with st.expander("Advanced Filters", icon=":material/tune:"):
                 st.markdown('<div class="filter-section">', unsafe_allow_html=True)
                 filter_cols = st.columns(3)
 
@@ -632,7 +727,7 @@ def render_job_search():
 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            if st.button("SEARCH JOBS", type="primary", use_container_width=True):
+            if st.button("SEARCH JOBS", type="primary", width="stretch"):
                 if job_query:
                     job_portal = JobPortal()
                     results = job_portal.search_jobs(job_query, location, experience)
@@ -673,18 +768,24 @@ def render_job_search():
                             </style>
                         """, unsafe_allow_html=True)
 
-                        st.markdown("### 🎯 Job Search Results")
+                        st.markdown("### :material/work: Job Search Results")
                         for result in results:
+                            safe_portal = html.escape(str(result["portal"]), quote=True)
+                            safe_title = html.escape(str(result["title"]), quote=True)
+                            raw_url = str(result["url"])
+                            safe_url = html.escape(raw_url, quote=True) if raw_url.startswith(("http://", "https://")) else "#"
+                            safe_icon = html.escape(str(result["icon"]), quote=True)
+                            safe_color = html.escape(str(result["color"]), quote=True)
                             with st.container():
                                 st.markdown(f"""
                                 <div class="result-card">
                                     <div class="portal-name">
-                                        <i class="{result["icon"]}" style="color: {result["color"]}"></i>
-                                        {result["portal"]}
+                                        <i class="{safe_icon}" style="color: {safe_color}"></i>
+                                        {safe_portal}
                                     </div>
-                                    <p>{result["title"]}</p>
-                                    <a href="{result["url"]}" target="_blank" class="portal-link">
-                                        View Jobs on {result["portal"]} →
+                                    <p>{safe_title}</p>
+                                    <a href="{safe_url}" target="_blank" class="portal-link">
+                                        View Jobs on {safe_portal} →
                                     </a>
                                 </div>
                                 """, unsafe_allow_html=True)
@@ -704,6 +805,5 @@ def render_job_search():
 
 
 def render_job_search_page():
-    """Render the job search page with page toast."""
+    """Render the job search page."""
     render_job_search()
-    st.toast("Check out these repositories: [GeeksforGeeks-POTD](https://github.com/latamishra5/GeeksforGeeks-POTD)", icon="ℹ️")

@@ -1,19 +1,71 @@
 """Resume builder page view."""
 
-import traceback
+import logging
 import streamlit as st
 
+from backend.auth.auth_service import AuthService
 from backend.database.connection import save_resume_data
+
+logger = logging.getLogger(__name__)
+
+
+def _apply_prefill_to_form_data(personal: dict, summary: str = "", skills_list: list | None = None):
+    """Apply prefill contact, summary, and skills cleanly into builder session state."""
+    pinfo = st.session_state.form_data["personal_info"]
+    for src_key, dst_key in (
+        ("full_name", "full_name"),
+        ("name", "full_name"),
+        ("email", "email"),
+        ("phone", "phone"),
+        ("location", "location"),
+        ("linkedin", "linkedin"),
+        ("portfolio", "portfolio"),
+    ):
+        val = str(personal.get(src_key) or "").strip()
+        if val and (dst_key != "full_name" or not pinfo.get("full_name")):
+            pinfo[dst_key] = val
+    if summary and not st.session_state.form_data.get("summary"):
+        st.session_state.form_data["summary"] = summary.strip()
+    if skills_list:
+        existing_tech = st.session_state.form_data["skills_categories"].get("technical", [])
+        merged = list(dict.fromkeys([*existing_tech, *(str(s).strip() for s in skills_list if str(s).strip())]))
+        st.session_state.form_data["skills_categories"]["technical"] = merged
+    if pinfo.get("email"):
+        st.session_state["email_input"] = pinfo["email"]
 
 
 def render_builder(builder):
-    st.title("Resume Builder 📝")
+    st.title("Resume Builder")
     st.write("Create your professional resume")
 
     # Template selection
     template_options = ["Modern", "Professional", "Minimal", "Creative"]
     selected_template = st.selectbox("Select Resume Template", template_options)
-    st.success(f"🎨 Currently using: {selected_template} Template")
+    st.success(f"Currently using: {selected_template} Template", icon=":material/palette:")
+
+    is_authed = bool(
+        st.session_state.get("authenticated") and isinstance(st.session_state.get("user_id"), int)
+    )
+    has_parsed = bool(st.session_state.get("last_parsed_resume"))
+    if is_authed or has_parsed:
+        pre_col1, pre_col2 = st.columns(2)
+        with pre_col1:
+            if is_authed and st.button("Pre-fill from My Profile", icon=":material/person:", key="prefill_profile_btn"):
+                profile = AuthService().get_user_profile(st.session_state["user_id"])
+                if profile:
+                    _apply_prefill_to_form_data(profile)
+                    st.success("Loaded contact fields from your account profile.")
+                    st.rerun()
+        with pre_col2:
+            if has_parsed and st.button("Pre-fill from Analyzed Resume", icon=":material/auto_fix_high:", key="prefill_parsed_btn"):
+                parsed = st.session_state["last_parsed_resume"]
+                _apply_prefill_to_form_data(
+                    parsed.get("personal_info", {}),
+                    summary=parsed.get("summary", ""),
+                    skills_list=st.session_state.get("last_resume_skills") or parsed.get("skills", []),
+                )
+                st.success("Loaded details from your last analyzed resume.")
+                st.rerun()
 
     # Personal Information
     st.subheader("Personal Information")
@@ -274,30 +326,37 @@ def render_builder(builder):
 
     st.session_state.form_data.update({'summary': summary})
 
+    live_payload = {
+        "personal_info": st.session_state.form_data['personal_info'],
+        "summary": st.session_state.form_data.get('summary', '').strip(),
+        "experience": st.session_state.form_data.get('experiences', []),
+        "education": st.session_state.form_data.get('education', []),
+        "projects": st.session_state.form_data.get('projects', []),
+        "skills": st.session_state.form_data.get('skills_categories', {}),
+        "template": selected_template,
+    }
+
+    with st.expander(":material/visibility: Live Resume Preview", expanded=False):
+        st.markdown(builder.render_resume_html_preview(live_payload), unsafe_allow_html=True)
+
     # Generate Resume button
-    if st.button("Generate Resume 📄", type="primary"):
-        print("Validating form data...")
-        print(f"Session state form data: {st.session_state.form_data}")
-        print(f"Email input value: {st.session_state.get('email_input', '')}")
+    if st.button("Generate Resume", icon=":material/description:", type="primary"):
+        logger.info("Validating resume builder form data")
 
         current_name = st.session_state.form_data['personal_info']['full_name'].strip()
         current_email = st.session_state.email_input if 'email_input' in st.session_state else ''
 
-        print(f"Current name: {current_name}")
-        print(f"Current email: {current_email}")
-
         if not current_name:
-            st.error("⚠️ Please enter your full name.")
+            st.error("Please enter your full name.", icon=":material/warning:")
             return
 
         if not current_email:
-            st.error("⚠️ Please enter your email address.")
+            st.error("Please enter your email address.", icon=":material/warning:")
             return
 
         st.session_state.form_data['personal_info']['email'] = current_email
 
         try:
-            print("Preparing resume data...")
             resume_data = {
                 "personal_info": st.session_state.form_data['personal_info'],
                 "summary": st.session_state.form_data.get('summary', '').strip(),
@@ -313,44 +372,47 @@ def render_builder(builder):
                 "template": selected_template,
             }
 
-            print(f"Resume data prepared: {resume_data}")
-
             try:
                 resume_buffer = builder.generate_resume(resume_data)
+                pdf_buffer = builder.generate_resume_pdf(resume_data)
                 if resume_buffer:
+                    active_uid = st.session_state.get("user_id") if st.session_state.get("authenticated") else None
                     try:
-                        save_resume_data(resume_data)
-                        st.success("✅ Resume generated successfully!")
-                        st.snow()
-                        st.download_button(
-                            label="Download Resume 📥",
-                            data=resume_buffer,
-                            file_name=f"{current_name.replace(' ', '_')}_resume.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            on_click=lambda: st.balloons(),
-                        )
+                        save_resume_data(resume_data, user_id=active_uid)
+                        st.success("Resume generated successfully.")
                     except Exception as db_error:
-                        print(f"Warning: Failed to save to database: {str(db_error)}")
-                        st.warning("⚠️ Resume generated but couldn't be saved to database")
-                        st.balloons()
+                        logger.warning("Failed to save generated resume to database: %s", db_error)
+                        st.warning("Resume generated, though it could not be saved to history.")
+
+                    dl_col1, dl_col2 = st.columns(2)
+                    safe_base = current_name.replace(' ', '_')
+                    with dl_col1:
                         st.download_button(
-                            label="Download Resume 📥",
+                            label="Download Resume (.docx)",
+                            icon=":material/download:",
                             data=resume_buffer,
-                            file_name=f"{current_name.replace(' ', '_')}_resume.docx",
+                            file_name=f"{safe_base}_resume.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            on_click=lambda: st.balloons(),
+                            type="primary",
+                            width="stretch",
                         )
+                    with dl_col2:
+                        if pdf_buffer:
+                            st.download_button(
+                                label="Download Resume (.pdf)",
+                                icon=":material/picture_as_pdf:",
+                                data=pdf_buffer,
+                                file_name=f"{safe_base}_resume.pdf",
+                                mime="application/pdf",
+                                width="stretch",
+                            )
                 else:
-                    st.error("❌ Failed to generate resume. Please try again.")
-                    print("Resume buffer was None")
+                    st.error("Failed to generate resume. Please try again.")
+                    logger.error("Resume builder returned empty buffer")
             except Exception as gen_error:
-                print(f"Error during resume generation: {str(gen_error)}")
-                print(f"Full traceback: {traceback.format_exc()}")
-                st.error(f"❌ Error generating resume: {str(gen_error)}")
+                logger.exception("Error during resume generation: %s", gen_error)
+                st.error(f"Error generating resume: {str(gen_error)}")
 
         except Exception as e:
-            print(f"Error preparing resume data: {str(e)}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            st.error(f"❌ Error preparing resume data: {str(e)}")
-
-    st.toast("Check out these repositories: [30-Days-Of-Rust](https://github.com/latamishra5/30-Days-Of-Rust)", icon="ℹ️")
+            logger.exception("Error preparing resume data: %s", e)
+            st.error(f"Error preparing resume data: {str(e)}")

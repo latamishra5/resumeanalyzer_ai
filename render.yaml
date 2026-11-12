@@ -1,0 +1,40 @@
+databases:
+  - name: resumeanalyzer-db
+    plan: free
+    databaseName: resumeanalyzer
+    user: resumeai
+
+services:
+  - type: web
+    name: resumeanalyzer-frontend
+    runtime: docker
+    plan: free
+    dockerCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resumeanalyzer-db
+          property: connectionString
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+
+  - type: web
+    name: resumeanalyzer-admin
+    runtime: docker
+    plan: free
+    dockerCommand: streamlit run backend/admin/app.py --server.port=$PORT --server.address=0.0.0.0
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resumeanalyzer-db
+          property: connectionString
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO

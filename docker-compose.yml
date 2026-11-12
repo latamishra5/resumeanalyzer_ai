@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: resumeanalyzer
+      POSTGRES_USER: resumeai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resumeai -d resumeanalyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      DATABASE_URL: postgresql://resumeai:${POSTGRES_PASSWORD:-change_me_local_dev}@db:5432/resumeanalyzer
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+  admin:
+    build: .
+    ports:
+      - "8502:8502"
+    environment:
+      DATABASE_URL: postgresql://resumeai:${POSTGRES_PASSWORD:-change_me_local_dev}@db:5432/resumeanalyzer
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["streamlit", "run", "backend/admin/app.py", "--server.port=8502", "--server.address=0.0.0.0"]
+
+volumes:
+  postgres_data:

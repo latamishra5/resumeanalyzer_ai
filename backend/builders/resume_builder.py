@@ -1,3 +1,8 @@
+import html
+import logging
+from io import BytesIO
+from xml.sax.saxutils import escape as xml_escape
+
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -5,9 +10,9 @@ from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
-from io import BytesIO
-import tempfile
-import traceback
+
+logger = logging.getLogger(__name__)
+
 
 class ResumeBuilder:
     def __init__(self):
@@ -15,45 +20,34 @@ class ResumeBuilder:
             "Modern": self.build_modern_template,
             "Professional": self.build_professional_template,
             "Minimal": self.build_minimal_template,
-            "Creative": self.build_creative_template
+            "Creative": self.build_creative_template,
         }
-        
+
     def generate_resume(self, data):
-        """Generate a resume based on the provided data and template"""
+        """Generate a resume based on the provided data and template."""
         try:
-            print(f"Starting resume generation with template: {data['template']}")
-            
-            # Create a new document
+            template_name = data["template"].lower()
+            logger.info("Generating DOCX resume using template=%s", template_name)
+
             doc = Document()
-            
-            # Select and apply template
-            template_name = data['template'].lower()
-            print(f"Using template: {template_name}")
-            
-            if template_name == 'modern':
+            if template_name == "modern":
                 doc = self.build_modern_template(doc, data)
-            elif template_name == 'professional':
+            elif template_name == "professional":
                 doc = self.build_professional_template(doc, data)
-            elif template_name == 'minimal':
+            elif template_name == "minimal":
                 doc = self.build_minimal_template(doc, data)
-            elif template_name == 'creative':
+            elif template_name == "creative":
                 doc = self.build_creative_template(doc, data)
             else:
-                print(f"Warning: Unknown template '{template_name}', falling back to modern template")
+                logger.warning("Unknown template '%s'; falling back to modern template", template_name)
                 doc = self.build_modern_template(doc, data)
-            
-            # Save to buffer
+
             buffer = BytesIO()
-            print("Saving document to buffer...")
             doc.save(buffer)
             buffer.seek(0)
-            print("Resume generated successfully!")
             return buffer
-            
-        except Exception as e:
-            print(f"Error in generate_resume: {str(e)}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            print(f"Template data: {data}")
+        except Exception as exc:
+            logger.exception("Error generating resume DOCX: %s", exc)
             raise
 
     def _format_list_items(self, items):
@@ -632,22 +626,25 @@ class ResumeBuilder:
             contact_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
             # Add name at the top
-            name_paragraph = doc.add_paragraph('✨ ' + data['personal_info']['full_name'] + ' ✨')
+            name_paragraph = doc.add_paragraph(data['personal_info']['full_name'].upper())
             name_paragraph.style = name_style
 
             # Add role/title if available
             if data['personal_info'].get('title'):
-                title = doc.add_paragraph('💫 ' + data['personal_info']['title'])
+                title = doc.add_paragraph(data['personal_info']['title'])
                 title.style = contact_style
 
             # Contact information layout
             contact_info = doc.add_paragraph()
             contact_info.style = contact_style
-            
+
             contact_parts = []
-            if data['personal_info'].get('email'): contact_parts.append(f"📧 {data['personal_info']['email']}")
-            if data['personal_info'].get('phone'): contact_parts.append(f"📱 {data['personal_info']['phone']}")
-            if data['personal_info'].get('location'): contact_parts.append(f"📍 {data['personal_info']['location']}")
+            if data['personal_info'].get('email'):
+                contact_parts.append(data['personal_info']['email'])
+            if data['personal_info'].get('phone'):
+                contact_parts.append(data['personal_info']['phone'])
+            if data['personal_info'].get('location'):
+                contact_parts.append(data['personal_info']['location'])
             if contact_parts:
                 contact_info.add_run(' | '.join(contact_parts))
 
@@ -656,13 +653,15 @@ class ResumeBuilder:
                 links = doc.add_paragraph()
                 links.style = contact_style
                 links_parts = []
-                if data['personal_info'].get('linkedin'): links_parts.append(f"🔗 LinkedIn: {data['personal_info']['linkedin']}")
-                if data['personal_info'].get('portfolio'): links_parts.append(f"🌐 Portfolio: {data['personal_info']['portfolio']}")
+                if data['personal_info'].get('linkedin'):
+                    links_parts.append(f"LinkedIn: {data['personal_info']['linkedin']}")
+                if data['personal_info'].get('portfolio'):
+                    links_parts.append(f"Portfolio: {data['personal_info']['portfolio']}")
                 links.add_run(' | '.join(links_parts))
 
             # Professional Summary
             if data.get('summary'):
-                doc.add_paragraph('👨‍💼 PROFESSIONAL SUMMARY', style=section_style)
+                doc.add_paragraph('PROFESSIONAL SUMMARY', style=section_style)
                 summary = doc.add_paragraph(data['summary'])
                 summary.style = normal_style
                 summary.paragraph_format.space_after = Pt(12)
@@ -670,26 +669,26 @@ class ResumeBuilder:
 
             # Experience Section
             if data.get('experience'):
-                doc.add_paragraph('💼 EXPERIENCE', style=section_style)
+                doc.add_paragraph('EXPERIENCE', style=section_style)
                 for exp in data['experience']:
                     p = doc.add_paragraph()
                     p.style = normal_style
                     p.paragraph_format.left_indent = Inches(0.2)
-                    
-                    p.add_run(f"🚀 {exp['position']}").bold = True
-                    p.add_run(f"\n🏢 {exp['company']}")
-                    p.add_run(f"\n📅 {exp['start_date']} - {exp['end_date']}")
-                    
+
+                    p.add_run(exp['position']).bold = True
+                    p.add_run(f"\n{exp['company']}")
+                    p.add_run(f"\n{exp['start_date']} - {exp['end_date']}")
+
                     if exp.get('description'):
                         desc = doc.add_paragraph(exp['description'])
                         desc.style = normal_style
                         desc.paragraph_format.left_indent = Inches(0.4)
-                    
+
                     if exp.get('responsibilities'):
                         resp_para = doc.add_paragraph()
                         resp_para.style = normal_style
                         resp_para.paragraph_format.left_indent = Inches(0.4)
-                        resp_para.add_run('🎯 Key Achievements:').bold = True
+                        resp_para.add_run('Key Achievements:').bold = True
                         for resp in self._format_list_items(exp['responsibilities']):
                             bullet = doc.add_paragraph()
                             bullet.style = normal_style
@@ -699,26 +698,26 @@ class ResumeBuilder:
 
             # Projects Section
             if data.get('projects'):
-                doc.add_paragraph('🛠️ PROJECTS', style=section_style)
+                doc.add_paragraph('PROJECTS', style=section_style)
                 for proj in data['projects']:
                     p = doc.add_paragraph()
                     p.style = normal_style
                     p.paragraph_format.left_indent = Inches(0.2)
-                    
-                    p.add_run(f"✨ {proj['name']}").bold = True
+
+                    p.add_run(proj['name']).bold = True
                     if proj.get('technologies'):
-                        p.add_run(f"\n💻 Technologies: {proj['technologies']}")
-                    
+                        p.add_run(f"\nTechnologies: {proj['technologies']}")
+
                     if proj.get('description'):
                         desc = doc.add_paragraph(proj['description'])
                         desc.style = normal_style
                         desc.paragraph_format.left_indent = Inches(0.4)
-                    
+
                     if proj.get('responsibilities'):
                         resp_para = doc.add_paragraph()
                         resp_para.style = normal_style
                         resp_para.paragraph_format.left_indent = Inches(0.4)
-                        resp_para.add_run('🎯 Key Features:').bold = True
+                        resp_para.add_run('Key Features:').bold = True
                         for resp in self._format_list_items(proj['responsibilities']):
                             bullet = doc.add_paragraph()
                             bullet.style = normal_style
@@ -728,38 +727,38 @@ class ResumeBuilder:
 
             # Education Section
             if data.get('education'):
-                doc.add_paragraph('🎓 EDUCATION', style=section_style)
+                doc.add_paragraph('EDUCATION', style=section_style)
                 for edu in data['education']:
                     p = doc.add_paragraph()
                     p.style = normal_style
                     p.paragraph_format.left_indent = Inches(0.2)
-                    
-                    p.add_run(f"📚 {edu['school']}").bold = True
-                    p.add_run(f"\n🎯 {edu['degree']} in {edu['field']}")
-                    p.add_run(f"\n📅 Graduation: {edu['graduation_date']}")
+
+                    p.add_run(edu['school']).bold = True
+                    p.add_run(f"\n{edu['degree']} in {edu['field']}")
+                    p.add_run(f"\nGraduation: {edu['graduation_date']}")
                     if edu.get('gpa'):
-                        p.add_run(f" | 📊 GPA: {edu['gpa']}")
+                        p.add_run(f" | GPA: {edu['gpa']}")
                     p.paragraph_format.space_after = Pt(8)
 
             # Skills Section
             if data.get('skills'):
-                doc.add_paragraph('⭐ SKILLS', style=section_style)
+                doc.add_paragraph('SKILLS', style=section_style)
                 skills = data['skills']
-                
-                def add_skill_category(category_name, title, icon):
+
+                def add_skill_category(category_name, title):
                     if skills.get(category_name):
                         p = doc.add_paragraph()
                         p.style = normal_style
                         p.paragraph_format.left_indent = Inches(0.2)
-                        p.add_run(f"{icon} {title}: ").bold = True
+                        p.add_run(f"{title}: ").bold = True
                         skills_text = ' • '.join(self._format_list_items(skills[category_name]))
                         p.add_run(skills_text)
                         p.paragraph_format.space_after = Pt(6)
-                
-                add_skill_category('technical', 'Technical Skills', '💻')
-                add_skill_category('soft', 'Soft Skills', '🤝')
-                add_skill_category('languages', 'Languages', '🌐')
-                add_skill_category('tools', 'Tools & Technologies', '🛠️')
+
+                add_skill_category('technical', 'Technical Skills')
+                add_skill_category('soft', 'Soft Skills')
+                add_skill_category('languages', 'Languages')
+                add_skill_category('tools', 'Tools & Technologies')
 
             # Set margins
             sections = doc.sections
@@ -775,60 +774,309 @@ class ResumeBuilder:
             print(f"Error in build_creative_template: {str(e)}")
             raise
 
-    def generate_preview(self, template_name, data):
-        """Generate a live preview of the resume"""
-        if template_name not in self.preview_templates:
-            return None
-            
-        template = self.preview_templates[template_name]
-        
-        # Format skills as HTML
-        skills_html = ""
-        if 'skills' in data:
-            if template_name == 'Modern':
-                skills_html = "".join([f'<div class="skill">{skill}</div>' for skill in data['skills']])
-            else:
-                skills_html = "".join([f'<div class="skill-item">{skill}</div>' for skill in data['skills']])
-        
-        # Format experience as HTML
-        experience_html = ""
-        if 'experience' in data:
-            for exp in data['experience']:
-                experience_html += f"""
-                <div class="experience-item">
-                    <h3>{exp.get('title', '')}</h3>
-                    <p class="company">{exp.get('company', '')}</p>
-                    <p class="date">{exp.get('date', '')}</p>
-                    <p class="description">{exp.get('description', '')}</p>
-                </div>
-                """
-        
-        # Format education as HTML
-        education_html = ""
-        if 'education' in data:
-            for edu in data['education']:
-                education_html += f"""
-                <div class="education-item">
-                    <h3>{edu.get('degree', '')}</h3>
-                    <p class="school">{edu.get('school', '')}</p>
-                    <p class="date">{edu.get('date', '')}</p>
-                </div>
-                """
-        
-        # Combine HTML and CSS
-        preview_html = template['html'].format(
-            name=data.get('name', 'Your Name'),
-            email=data.get('email', 'email@example.com'),
-            phone=data.get('phone', '123-456-7890'),
-            linkedin=data.get('linkedin', 'linkedin.com/in/yourprofile'),
-            title=data.get('title', 'Your Title'),
-            summary=data.get('summary', 'Your professional summary...'),
-            experience=experience_html,
-            education=education_html,
-            skills=skills_html
+    def render_resume_html_preview(self, data: dict) -> str:
+        """Render a clean, XSS-safe HTML resume preview card matching the selected template."""
+        personal = data.get("personal_info", {}) or {}
+        template_name = str(data.get("template") or "Modern").strip()
+        accent_map = {
+            "Modern": "#2563eb",
+            "Professional": "#0f766e",
+            "Minimal": "#334155",
+            "Creative": "#7c3aed",
+        }
+        accent = accent_map.get(template_name, "#2563eb")
+
+        name = html.escape(str(personal.get("full_name") or "Your Name"), quote=True)
+        contact_parts = [
+            html.escape(str(v), quote=True)
+            for v in (
+                personal.get("email"),
+                personal.get("phone"),
+                personal.get("location"),
+                personal.get("linkedin"),
+                personal.get("portfolio"),
+            )
+            if str(v or "").strip()
+        ]
+        contact_line = " &middot; ".join(contact_parts) if contact_parts else "email@example.com &middot; Location"
+
+        sections_html = []
+        summary = str(data.get("summary") or "").strip()
+        if summary:
+            sections_html.append(
+                f"<h4 style='color:{accent};border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin:14px 0 6px;'>SUMMARY</h4>"
+                f"<p style='margin:0;color:#1e293b;line-height:1.45;'>{html.escape(summary, quote=True)}</p>"
+            )
+
+        experiences = data.get("experience") or data.get("experiences") or []
+        if experiences:
+            exp_blocks = []
+            for exp in experiences:
+                role = html.escape(str(exp.get("position") or exp.get("title") or "Role"), quote=True)
+                company = html.escape(str(exp.get("company") or ""), quote=True)
+                dates = " - ".join(
+                    html.escape(str(d), quote=True)
+                    for d in (exp.get("start_date"), exp.get("end_date"))
+                    if str(d or "").strip()
+                )
+                desc = str(exp.get("description") or "").strip()
+                bullets = list(exp.get("responsibilities") or []) + list(exp.get("achievements") or [])
+                bullet_html = "".join(
+                    f"<li>{html.escape(str(b), quote=True)}</li>" for b in bullets if str(b or "").strip()
+                )
+                exp_blocks.append(
+                    f"<div style='margin-bottom:10px;'>"
+                    f"<div style='display:flex;justify-content:space-between;'><strong>{role}</strong>"
+                    f"<span style='color:#475569;font-size:0.85rem;'>{dates}</span></div>"
+                    f"<div style='color:#334155;font-size:0.9rem;'>{company}</div>"
+                    f"{f'<p style=\"margin:4px 0;color:#1e293b;\">{html.escape(desc, quote=True)}</p>' if desc else ''}"
+                    f"{f'<ul style=\"margin:4px 0 0 18px;color:#1e293b;\">{bullet_html}</ul>' if bullet_html else ''}"
+                    f"</div>"
+                )
+            sections_html.append(
+                f"<h4 style='color:{accent};border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin:14px 0 6px;'>EXPERIENCE</h4>"
+                + "".join(exp_blocks)
+            )
+
+        projects = data.get("projects") or []
+        if projects:
+            proj_blocks = []
+            for proj in projects:
+                pname = html.escape(str(proj.get("name") or "Project"), quote=True)
+                tech = html.escape(str(proj.get("technologies") or ""), quote=True)
+                pdesc = str(proj.get("description") or "").strip()
+                proj_blocks.append(
+                    f"<div style='margin-bottom:8px;'>"
+                    f"<strong>{pname}</strong>"
+                    f"{f' <span style=\"color:#475569;font-size:0.85rem;\">({tech})</span>' if tech else ''}"
+                    f"{f'<p style=\"margin:2px 0;color:#1e293b;\">{html.escape(pdesc, quote=True)}</p>' if pdesc else ''}"
+                    f"</div>"
+                )
+            sections_html.append(
+                f"<h4 style='color:{accent};border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin:14px 0 6px;'>PROJECTS</h4>"
+                + "".join(proj_blocks)
+            )
+
+        education = data.get("education") or []
+        if education:
+            edu_blocks = []
+            for edu in education:
+                school = html.escape(str(edu.get("school") or "Institution"), quote=True)
+                degree = html.escape(str(edu.get("degree") or ""), quote=True)
+                field = html.escape(str(edu.get("field") or ""), quote=True)
+                grad = html.escape(str(edu.get("graduation_date") or ""), quote=True)
+                gpa = html.escape(str(edu.get("gpa") or ""), quote=True)
+                detail = " ".join(p for p in (degree, f"in {field}" if field else "") if p).strip()
+                meta = " &middot; ".join(p for p in (grad, f"GPA: {gpa}" if gpa else "") if p)
+                edu_blocks.append(
+                    f"<div style='margin-bottom:6px;'><strong>{school}</strong>"
+                    f"{f' &mdash; {detail}' if detail else ''}"
+                    f"{f' <span style=\"color:#475569;font-size:0.85rem;\">({meta})</span>' if meta else ''}</div>"
+                )
+            sections_html.append(
+                f"<h4 style='color:{accent};border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin:14px 0 6px;'>EDUCATION</h4>"
+                + "".join(edu_blocks)
+            )
+
+        skills = data.get("skills") or {}
+        if isinstance(skills, dict):
+            skill_lines = []
+            for key, title in (
+                ("technical", "Technical"),
+                ("tools", "Tools"),
+                ("languages", "Languages"),
+                ("soft", "Soft Skills"),
+            ):
+                items = [html.escape(str(s), quote=True) for s in (skills.get(key) or []) if str(s or "").strip()]
+                if items:
+                    skill_lines.append(f"<div><strong>{title}:</strong> {', '.join(items)}</div>")
+            if skill_lines:
+                sections_html.append(
+                    f"<h4 style='color:{accent};border-bottom:1px solid #cbd5e1;padding-bottom:4px;margin:14px 0 6px;'>SKILLS</h4>"
+                    + "".join(skill_lines)
+                )
+
+        body = "".join(sections_html) or "<p style='color:#64748b;'>Fill out sections above to see a live document preview.</p>"
+        return (
+            f"<div style='background:#ffffff;color:#0f172a;padding:24px 28px;border-radius:10px;"
+            f"border-top:6px solid {accent};box-shadow:0 4px 16px rgba(0,0,0,0.2);font-family:Segoe UI,Arial,sans-serif;'>"
+            f"<div style='text-align:center;margin-bottom:10px;'>"
+            f"<h2 style='margin:0;color:{accent};'>{name}</h2>"
+            f"<div style='color:#475569;font-size:0.88rem;margin-top:4px;'>{contact_line}</div>"
+            f"</div>{body}</div>"
         )
-        
+
+    def generate_resume_pdf(self, data: dict):
+        """Generate an ATS-friendly PDF version of the built resume via ReportLab."""
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.lib.units import inch
+            from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
+
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=letter,
+                leftMargin=0.65 * inch,
+                rightMargin=0.65 * inch,
+                topMargin=0.6 * inch,
+                bottomMargin=0.6 * inch,
+            )
+            styles = getSampleStyleSheet()
+            accent_hex = {
+                "Modern": "#1d4ed8",
+                "Professional": "#0f766e",
+                "Minimal": "#1e293b",
+                "Creative": "#6d28d9",
+            }.get(str(data.get("template") or "Modern").strip(), "#1d4ed8")
+            accent = colors.HexColor(accent_hex)
+
+            name_style = ParagraphStyle(
+                "ResumeName",
+                parent=styles["Heading1"],
+                fontSize=19,
+                leading=22,
+                textColor=accent,
+                alignment=1,
+                spaceAfter=4,
+            )
+            contact_style = ParagraphStyle(
+                "ResumeContact",
+                parent=styles["Normal"],
+                fontSize=9.5,
+                leading=12,
+                textColor=colors.HexColor("#475569"),
+                alignment=1,
+                spaceAfter=10,
+            )
+            sec_style = ParagraphStyle(
+                "ResumeSec",
+                parent=styles["Heading2"],
+                fontSize=11,
+                leading=14,
+                textColor=accent,
+                spaceBefore=8,
+                spaceAfter=4,
+            )
+            body_style = ParagraphStyle(
+                "ResumeBody",
+                parent=styles["Normal"],
+                fontSize=10,
+                leading=13.5,
+                textColor=colors.HexColor("#0f172a"),
+                spaceAfter=3,
+            )
+            bullet_style = ParagraphStyle(
+                "ResumeBullet",
+                parent=body_style,
+                leftIndent=14,
+                spaceAfter=2,
+            )
+
+            personal = data.get("personal_info", {}) or {}
+            story = [
+                Paragraph(xml_escape(str(personal.get("full_name") or "Resume")), name_style),
+            ]
+            contact_vals = [
+                xml_escape(str(v).strip())
+                for v in (
+                    personal.get("email"),
+                    personal.get("phone"),
+                    personal.get("location"),
+                    personal.get("linkedin"),
+                    personal.get("portfolio"),
+                )
+                if str(v or "").strip()
+            ]
+            if contact_vals:
+                story.append(Paragraph(" | ".join(contact_vals), contact_style))
+
+            def add_heading(title):
+                story.append(Paragraph(title, sec_style))
+                story.append(HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#cbd5e1"), spaceAfter=4))
+
+            if str(data.get("summary") or "").strip():
+                add_heading("PROFESSIONAL SUMMARY")
+                story.append(Paragraph(xml_escape(str(data["summary"]).strip()), body_style))
+
+            experiences = data.get("experience") or data.get("experiences") or []
+            if experiences:
+                add_heading("EXPERIENCE")
+                for exp in experiences:
+                    pos = xml_escape(str(exp.get("position") or exp.get("title") or "Role"))
+                    comp = xml_escape(str(exp.get("company") or ""))
+                    dates = " - ".join(
+                        xml_escape(str(d).strip())
+                        for d in (exp.get("start_date"), exp.get("end_date"))
+                        if str(d or "").strip()
+                    )
+                    header = f"<b>{pos}</b>" + (f" — {comp}" if comp else "") + (f" ({dates})" if dates else "")
+                    story.append(Paragraph(header, body_style))
+                    if str(exp.get("description") or "").strip():
+                        story.append(Paragraph(xml_escape(str(exp["description"]).strip()), body_style))
+                    for item in list(exp.get("responsibilities") or []) + list(exp.get("achievements") or []):
+                        if str(item or "").strip():
+                            story.append(Paragraph(f"- {xml_escape(str(item).strip())}", bullet_style))
+                    story.append(Spacer(1, 4))
+
+            projects = data.get("projects") or []
+            if projects:
+                add_heading("PROJECTS")
+                for proj in projects:
+                    pname = xml_escape(str(proj.get("name") or "Project"))
+                    tech = xml_escape(str(proj.get("technologies") or ""))
+                    story.append(Paragraph(f"<b>{pname}</b>" + (f" ({tech})" if tech else ""), body_style))
+                    if str(proj.get("description") or "").strip():
+                        story.append(Paragraph(xml_escape(str(proj["description"]).strip()), body_style))
+                    for item in list(proj.get("responsibilities") or []) + list(proj.get("achievements") or []):
+                        if str(item or "").strip():
+                            story.append(Paragraph(f"- {xml_escape(str(item).strip())}", bullet_style))
+
+            education = data.get("education") or []
+            if education:
+                add_heading("EDUCATION")
+                for edu in education:
+                    school = xml_escape(str(edu.get("school") or ""))
+                    deg = xml_escape(str(edu.get("degree") or ""))
+                    fld = xml_escape(str(edu.get("field") or ""))
+                    grad = xml_escape(str(edu.get("graduation_date") or ""))
+                    gpa = xml_escape(str(edu.get("gpa") or ""))
+                    line = f"<b>{school}</b>"
+                    if deg or fld:
+                        line += f" — {deg} {fld}".strip()
+                    if grad:
+                        line += f" | {grad}"
+                    if gpa:
+                        line += f" | GPA: {gpa}"
+                    story.append(Paragraph(line, body_style))
+
+            skills = data.get("skills") or {}
+            if isinstance(skills, dict) and any(skills.values()):
+                add_heading("SKILLS")
+                for key, title in (
+                    ("technical", "Technical Skills"),
+                    ("tools", "Tools & Technologies"),
+                    ("languages", "Languages"),
+                    ("soft", "Soft Skills"),
+                ):
+                    items = [xml_escape(str(s).strip()) for s in (skills.get(key) or []) if str(s or "").strip()]
+                    if items:
+                        story.append(Paragraph(f"<b>{title}:</b> {', '.join(items)}", body_style))
+
+            doc.build(story)
+            buffer.seek(0)
+            return buffer
+        except Exception as exc:
+            logger.exception("Error generating PDF resume: %s", exc)
+            return None
+
+    def generate_preview(self, template_name, data):
+        """Generate a live HTML preview payload of the resume."""
+        merged = dict(data or {})
+        merged.setdefault("template", template_name)
         return {
-            'html': preview_html,
-            'css': template['css']
+            "html": self.render_resume_html_preview(merged),
+            "css": "",
         }

@@ -6,13 +6,27 @@ import re
 import tempfile
 
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 import pypdf
 import requests
 
 from backend.config.settings import ENV_PATH
 
 logger = logging.getLogger(__name__)
+
+
+def clean_markdown(text):
+    """Strip common markdown syntax for plain text or PDF rendering."""
+    if not text:
+        return ""
+
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
+    return text.strip()
 
 
 class AIResumeAnalyzer:
@@ -27,8 +41,11 @@ class AIResumeAnalyzer:
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
-        if self.google_api_key:
-            genai.configure(api_key=self.google_api_key)
+        self.gemini_client = (
+            genai.Client(api_key=self.google_api_key)
+            if self.google_api_key and self.google_api_key != "your_google_api_key_here"
+            else None
+        )
 
     def _notify(self, level, message):
         """Emit status or error messages without coupling backend to any UI framework."""
@@ -105,26 +122,10 @@ class AIResumeAnalyzer:
         if not resume_text:
             return {"error": "Resume text is required for analysis."}
         
-        if not self.google_api_key or self.google_api_key == "your_google_api_key_here":
+        if not self.gemini_client:
             return self._fallback_analysis(resume_text, job_description, job_role)
-        
+
         try:
-            # Try different model names in order of preference
-            model_names = ["gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro", "gemini-pro-vision"]
-            model = None
-            
-            for model_name in model_names:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    # Test the model with a simple request
-                    test_response = model.generate_content("Hello")
-                    break
-                except:
-                    continue
-            
-            if not model:
-                return self._fallback_analysis(resume_text, job_description, job_role)
-            
             base_prompt = f"""
             You are a resume expert. Analyze this resume and give simple, clear advice that anyone can understand.
             
@@ -194,20 +195,55 @@ class AIResumeAnalyzer:
                 [List specific requirements from the job description that are not addressed in the resume, with recommendations on how to address each gap]
                 """
             
-            response = model.generate_content(base_prompt)
+            model_names = [
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-1.5-flash",
+            ]
+            response = None
+            selected_model = None
+            for model_name in model_names:
+                try:
+                    candidate_response = self.gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=base_prompt,
+                    )
+                    if candidate_response and getattr(candidate_response, "text", None):
+                        response = candidate_response
+                        selected_model = model_name
+                        break
+                except Exception as exc:
+                    logger.debug("Gemini model %s unavailable: %s", model_name, exc)
+                    continue
+
+            if not response or not getattr(response, "text", None):
+                return self._fallback_analysis(resume_text, job_description, job_role)
+
             analysis = response.text.strip()
-            
+
             # Extract resume score if present
             resume_score = self._extract_score_from_text(analysis)
-            
+
             # Extract ATS score if present
             ats_score = self._extract_ats_score_from_text(analysis)
-            
-            return {
+            structured = self.build_structured_insights(
+                resume_text,
+                job_description=job_description,
+                job_role=job_role,
+            )
+
+            result = {
                 "analysis": analysis,
                 "resume_score": resume_score,
-                "ats_score": ats_score
+                "ats_score": ats_score,
+                "analysis_mode": "gemini_ai",
+                "model_id": selected_model,
+                "structured": structured,
             }
+            if job_description:
+                result["job_match_score"] = structured.get("keyword_match_score", ats_score)
+            return result
         
         except Exception as e:
             return self._fallback_analysis(resume_text, job_description, job_role)
@@ -229,10 +265,10 @@ class AIResumeAnalyzer:
             has_education = any(keyword.lower() in resume_text.lower() for keyword in ['education', 'university', 'college'])
             has_skills = any(keyword.lower() in resume_text.lower() for keyword in ['skills', 'technical', 'technologies'])
             
-            # Generate basic scores (more realistic scoring)
-            resume_score = 45  # Base score (most resumes have room for improvement)
-            ats_score = 50     # Base ATS score
-            
+            # Generate deterministic heuristic scores based on detected resume signals
+            resume_score = 45
+            ats_score = 50
+
             if has_email and has_phone:
                 resume_score += 8
                 ats_score += 10
@@ -245,13 +281,11 @@ class AIResumeAnalyzer:
             if has_skills:
                 resume_score += 7
                 ats_score += 10
-            
-            # Add some randomness to make it more realistic
-            import random
-            resume_score += random.randint(-5, 5)
-            ats_score += random.randint(-3, 3)
-            
-            # Cap scores at 85 for most cases (excellent but not perfect)
+            if 300 <= word_count <= 900:
+                resume_score += 5
+                ats_score += 5
+
+            # Cap scores at 85 for fallback heuristic analysis
             resume_score = min(max(resume_score, 30), 85)
             ats_score = min(max(ats_score, 35), 90)
             
@@ -367,16 +401,252 @@ Resume Score: {resume_score}/100
 
 *Note: For detailed AI-powered analysis with personalized recommendations, ensure your Google API key is properly configured in the .env file.*
 """
-            
-            return {
+            structured = self.build_structured_insights(
+                resume_text,
+                job_description=job_description,
+                job_role=job_role,
+            )
+            result = {
                 "analysis": analysis,
                 "resume_score": resume_score,
                 "ats_score": ats_score,
-                "fallback_used": True
+                "fallback_used": True,
+                "analysis_mode": "deterministic_fallback",
+                "structured": structured,
             }
+            if job_description:
+                result["job_match_score"] = structured.get("keyword_match_score", ats_score)
+            return result
             
         except Exception as e:
             return {"error": f"Fallback analysis failed: {str(e)}"}
+
+    _ROLE_KEYWORDS = {
+        "software": ["python", "java", "javascript", "typescript", "sql", "git", "docker", "kubernetes", "rest api", "ci/cd", "aws", "testing"],
+        "data": ["python", "sql", "pandas", "numpy", "machine learning", "statistics", "tableau", "power bi", "etl", "scikit-learn", "aws"],
+        "product": ["roadmap", "agile", "scrum", "stakeholder", "kpi", "a/b testing", "user research", "sql", "analytics", "prioritization"],
+        "design": ["figma", "wireframing", "prototyping", "user research", "design system", "accessibility", "usability testing", "html", "css"],
+        "manager": ["agile", "scrum", "budgeting", "risk management", "stakeholder", "kpi", "mentoring", "strategy", "cross-functional"],
+        "default": ["communication", "project management", "problem solving", "data analysis", "git", "sql", "excel", "agile"],
+    }
+
+    _WEAK_VERB_MAP = {
+        "worked on": "Engineered",
+        "helped with": "Collaborated to deliver",
+        "responsible for": "Owned and executed",
+        "assisted in": "Supported and accelerated",
+        "made": "Built and launched",
+        "did": "Executed",
+        "handled": "Managed and streamlined",
+        "participated in": "Contributed to",
+    }
+
+    def _select_target_keywords(self, job_description=None, job_role=None, role_info=None):
+        """Build a deduplicated list of relevant target keywords from JD or role."""
+        keywords = []
+        if role_info and isinstance(role_info, dict):
+            keywords.extend(str(s).strip() for s in role_info.get("required_skills", []) if str(s).strip())
+            keywords.extend(str(s).strip() for s in role_info.get("recommended_skills", []) if str(s).strip())
+
+        if job_description:
+            jd_lower = job_description.lower()
+            known_terms = sorted(
+                {
+                    "python", "java", "javascript", "typescript", "c++", "go", "rust", "sql",
+                    "postgresql", "mysql", "mongodb", "redis", "docker", "kubernetes", "aws",
+                    "azure", "gcp", "terraform", "ci/cd", "git", "github", "fastapi", "django",
+                    "flask", "react", "node.js", "next.js", "pandas", "numpy", "scikit-learn",
+                    "pytorch", "tensorflow", "tableau", "power bi", "spark", "airflow", "etl",
+                    "rest api", "graphql", "microservices", "agile", "scrum", "figma",
+                    "unit testing", "pytest", "linux", "llm", "rag", "gemini",
+                },
+                key=len,
+                reverse=True,
+            )
+            for term in known_terms:
+                if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", jd_lower):
+                    keywords.append(term.title() if len(term) > 3 else term.upper())
+
+            # Extract high-signal capitalized/technical phrases if curated list matched sparsely
+            if len(keywords) < 6:
+                stopwords = {
+                    "about", "above", "across", "after", "build", "candidate", "company", "create",
+                    "daily", "duties", "ensure", "experience", "great", "including", "looking",
+                    "other", "position", "qualifications", "required", "requirements", "responsibilities",
+                    "role", "skills", "strong", "team", "their", "these", "this", "using", "with",
+                    "work", "working", "years", "your",
+                }
+                tokens = re.findall(r"\b[a-zA-Z][a-zA-Z0-9+#.-]{2,}\b", job_description)
+                seen_tokens = set()
+                for tok in tokens:
+                    low = tok.lower()
+                    if low not in stopwords and low not in seen_tokens:
+                        seen_tokens.add(low)
+                        keywords.append(tok)
+                    if len(keywords) >= 14:
+                        break
+
+        if len(keywords) < 6:
+            role_lower = str(job_role or "").lower()
+            bucket = "default"
+            if any(k in role_lower for k in ("software", "developer", "engineer", "backend", "frontend", "full stack")):
+                bucket = "software"
+            elif any(k in role_lower for k in ("data", "analyst", "scientist", "ml", "ai")):
+                bucket = "data"
+            elif any(k in role_lower for k in ("product", "pm")):
+                bucket = "product"
+            elif any(k in role_lower for k in ("design", "ux", "ui")):
+                bucket = "design"
+            elif any(k in role_lower for k in ("manager", "lead", "director")):
+                bucket = "manager"
+            keywords.extend(self._ROLE_KEYWORDS[bucket])
+
+        deduped = []
+        seen = set()
+        for kw in keywords:
+            norm = kw.strip().lower()
+            if norm and norm not in seen:
+                seen.add(norm)
+                deduped.append(kw.strip())
+        return deduped[:16]
+
+    def build_structured_insights(self, resume_text, job_description=None, job_role=None, role_info=None):
+        """Compute deterministic structured ATS gap matrix, section scores, and bullet rewrites."""
+        text = resume_text or ""
+        text_lower = text.lower()
+        target_keywords = self._select_target_keywords(job_description, job_role, role_info)
+
+        matched = []
+        missing = []
+        for kw in target_keywords:
+            if re.search(rf"(?<!\w){re.escape(kw.lower())}(?!\w)", text_lower):
+                matched.append(kw)
+            else:
+                missing.append(kw)
+
+        keyword_score = round((len(matched) / len(target_keywords)) * 100) if target_keywords else 0
+
+        has_email = bool(re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text))
+        has_phone = bool(re.search(r"\+?\d[\d\s().-]{7,}\d", text))
+        has_links = any(k in text_lower for k in ("linkedin.com", "github.com", "http://", "https://"))
+        contact_score = (40 if has_email else 0) + (35 if has_phone else 0) + (25 if has_links else 0)
+
+        has_summary = any(k in text_lower for k in ("summary", "objective", "profile"))
+        summary_score = 80 if has_summary else 35
+
+        has_exp = any(k in text_lower for k in ("experience", "employment", "work history"))
+        metrics_hits = len(re.findall(r"\b\d+(?:%|\+|k|m|x|\s*years?)\b", text_lower))
+        exp_score = (45 if has_exp else 15) + min(metrics_hits * 15, 55)
+
+        has_skills = any(k in text_lower for k in ("skills", "technologies", "tech stack"))
+        skills_score = (40 if has_skills else 15) + min(len(matched) * 10, 60)
+
+        has_edu = any(k in text_lower for k in ("education", "university", "bachelor", "master", "degree"))
+        edu_score = 90 if has_edu else 30
+
+        bullet_candidates = [
+            line.strip().lstrip("-*• ").strip()
+            for line in text.splitlines()
+            if line.strip() and (
+                line.strip().startswith(("-", "*", "•"))
+                or any(line.lower().strip().startswith(w) for w in self._WEAK_VERB_MAP)
+            )
+            and 20 <= len(line.strip()) <= 240
+        ][:3]
+        bullet_rewrites = self.rewrite_resume_bullets(
+            "\n".join(bullet_candidates),
+            job_role=job_role,
+            job_description=job_description,
+            allow_llm=False,
+        ) if bullet_candidates else []
+
+        return {
+            "matched_keywords": matched,
+            "missing_keywords": missing,
+            "keyword_match_score": int(keyword_score),
+            "section_scores": {
+                "Contact & Links": min(100, contact_score),
+                "Summary": min(100, summary_score),
+                "Experience & Impact": min(100, exp_score),
+                "Skills Coverage": min(100, skills_score),
+                "Education": min(100, edu_score),
+            },
+            "bullet_rewrites": bullet_rewrites,
+        }
+
+    def rewrite_resume_bullets(self, bullets_text, job_role=None, job_description=None, allow_llm=True):
+        """Rewrite resume bullet points into action-and-impact STAR phrasing (Gemini + deterministic fallback)."""
+        raw_lines = [
+            line.strip().lstrip("-*• ").strip()
+            for line in (bullets_text or "").splitlines()
+            if line.strip()
+        ]
+        if not raw_lines:
+            return []
+
+        if allow_llm and self.gemini_client:
+            prompt = (
+                "Rewrite each resume bullet point below to use strong action verbs, clear ownership, "
+                "and concise impact metrics placeholders only where numbers aren't already given. "
+                f"Target Role: {job_role or 'General Professional'}.\n"
+                f"{f'Job Description context: {job_description[:1200]}' if job_description else ''}\n\n"
+                "Return ONLY valid JSON: an array of objects with keys 'original', 'improved', and 'reason'.\n"
+                "Bullets:\n" + "\n".join(f"- {b}" for b in raw_lines[:6])
+            )
+            for model_name in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"):
+                try:
+                    resp = self.gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config={"response_mime_type": "application/json"},
+                    )
+                    payload = json.loads(getattr(resp, "text", "") or "[]")
+                    if isinstance(payload, list) and payload:
+                        cleaned = []
+                        for item in payload:
+                            if isinstance(item, dict) and item.get("improved"):
+                                cleaned.append({
+                                    "original": str(item.get("original", "")).strip(),
+                                    "improved": str(item.get("improved", "")).strip(),
+                                    "reason": str(item.get("reason", "Strengthened action verb and measurable outcome")).strip(),
+                                })
+                        if cleaned:
+                            return cleaned
+                except Exception as exc:
+                    logger.debug("Gemini bullet rewriter fallback (%s): %s", model_name, exc)
+                    continue
+
+        rewrites = []
+        role_hint = f" supporting {job_role} goals" if job_role and job_role != "Not specified" else ""
+        for bullet in raw_lines[:6]:
+            lower = bullet.lower()
+            improved = bullet
+            reasons = []
+
+            for weak, strong in self._WEAK_VERB_MAP.items():
+                if lower.startswith(weak):
+                    remainder = bullet[len(weak):].strip(" :-")
+                    improved = f"{strong} {remainder}"
+                    reasons.append(f"Replaced passive opener '{weak}' with '{strong}'")
+                    break
+            else:
+                if improved and improved[0].islower():
+                    improved = "Engineered and delivered " + improved
+                    reasons.append("Added active ownership opener")
+
+            has_metric = bool(re.search(r"\b\d+(?:%|\+|k|m|x)\b", improved.lower()))
+            if not has_metric:
+                improved = improved.rstrip(".") + f", achieving measurable efficiency or quality gains{role_hint} ([add % / time saved])."
+                reasons.append("Added measurable outcome prompt")
+            elif not reasons:
+                reasons.append("Preserved strong metrics and active voice")
+
+            rewrites.append({
+                "original": bullet,
+                "improved": improved,
+                "reason": "; ".join(reasons),
+            })
+        return rewrites
     
     def generate_pdf_report(self, analysis_result, candidate_name, job_role):
         """Generate a PDF report of the analysis"""
@@ -400,25 +670,6 @@ Resume Score: {resume_score}/100
                 self._notify("error", f"Error importing PDF libraries: {str(e)}")
                 self._notify("info", "Please make sure reportlab is installed: pip install reportlab")
                 return self.simple_generate_pdf_report(analysis_result, candidate_name, job_role)
-            
-            # Helper function to clean markdown formatting
-            def clean_markdown(text):
-                if not text:
-                    return ""
-                
-                # Remove markdown formatting for bold and italic
-                text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Remove ** for bold
-                text = re.sub(r'\*(.*?)\*', r'\1', text)      # Remove * for italic
-                text = re.sub(r'__(.*?)__', r'\1', text)      # Remove __ for bold
-                text = re.sub(r'_(.*?)_', r'\1', text)        # Remove _ for italic
-                
-                # Remove markdown formatting for headers
-                text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-                
-                # Remove markdown formatting for links
-                text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
-                
-                return text.strip()
             
             # Validate input data
             if not analysis_result:
@@ -1317,12 +1568,8 @@ Resume Score: {resume_score}/100
             if model == "Google Gemini":
                 result = self.analyze_resume_with_gemini(resume_text, job_description, job_role)
                 model_used = "Google Gemini"
-            elif model == "Anthropic Claude":
-                result = self.analyze_resume_with_anthropic(resume_text, job_description, job_role)
-                # Get the actual model used from the result
-                model_used = result.get("model_used", "Anthropic Claude")
             else:
-                # Default to Gemini if model not recognized
+                # Fallback to Gemini / rule-based analyzer when unsupported model name is requested
                 result = self.analyze_resume_with_gemini(resume_text, job_description, job_role)
                 model_used = "Google Gemini"
             
@@ -1369,12 +1616,13 @@ Resume Score: {resume_score}/100
                 "weaknesses": weaknesses,
                 "suggestions": suggestions,
                 "full_response": analysis_text,
-                "model_used": model_used
+                "model_used": model_used,
+                "fallback_used": result.get("fallback_used", False),
+                "analysis_mode": result.get("analysis_mode", "gemini_ai"),
             }
-            
+
         except Exception as e:
-            print(f"Error in analyze_resume: {str(e)}")
-            print(traceback.format_exc())
+            logger.exception("Error in analyze_resume: %s", e)
             return {
                 "error": f"Analysis failed: {str(e)}",
                 "score": 0,
@@ -1408,25 +1656,6 @@ Resume Score: {resume_score}/100
                 self._notify("error", f"Error importing PDF libraries: {str(e)}")
                 self._notify("info", "Please make sure reportlab is installed: pip install reportlab")
                 return None
-            
-            # Helper function to clean markdown formatting
-            def clean_markdown(text):
-                if not text:
-                    return ""
-                
-                # Remove markdown formatting for bold and italic
-                text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Remove ** for bold
-                text = re.sub(r'\*(.*?)\*', r'\1', text)      # Remove * for italic
-                text = re.sub(r'__(.*?)__', r'\1', text)      # Remove __ for bold
-                text = re.sub(r'_(.*?)_', r'\1', text)        # Remove _ for italic
-                
-                # Remove markdown formatting for headers
-                text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-                
-                # Remove markdown formatting for links
-                text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
-                
-                return text.strip()
             
             # Validate input data
             if not analysis_result:
